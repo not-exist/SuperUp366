@@ -88,8 +88,9 @@
 | studytask-api.up366.cn | /client/book/plan | POST | 课程学习计划 | main/index.js:3567342 |
 | studytask-api.up366.cn | /client/student/job/info | — | 死配置 | 定义 |
 | school.up366.cn | /client/textbook/chapter/weight/list | — | 死配置 | 定义 |
-| dsb-api.up366.cn | /client/book/finished-task/list | GET | 已完成任务列表 `{bookId}` | main/index.js:3617381 |
-| dsb-api.up366.cn | /client/student/task/answer/detail | GET | 任务答题详情（整个对象作为 searchParams） | main/index.js:3572521 |
+| dsb-api.up366.cn | /client/book/finished-task/list | GET（PC）/ POST（H5） | 已完成任务列表 `{bookId}`（PC/H5 都不传 courseId） | main/index.js:3617392；H5 chunk-6b733b35.js@9507 |
+| dsb-api.up366.cn | /client/student/task/answer/detail | GET | 任务答题详情（PC：`{courseId,bookId,taskId,uid}`；调用点 @3768493） | main/index.js:3561535、3572472、3768493 |
+| dsb-api.up366.cn | /client/student/task/answer/detail/v2 | POST | 任务答题详情 v2（H5 路由参数 `{uid,bookId,taskId}`） | H5 chunk-6c496ba5.js@892819 |
 
 ### 1.5 study-api / xot-api / qlib-api —— 答题提交与试卷
 
@@ -626,37 +627,43 @@
 - **备注**：**有缓存**——key=`getTaskLinked_${uid}_${bookId}_${taskId}_${type}`，TTL `72e5` ms（2 小时），仅 `result.code==0` 时写缓存（@3568020）；上层 `fetchSimpleBookTreeInfo` 另有一层 `AppInfo.getMemoryData` 内存缓存（@3868920）。无 ut。
 - **证据**：main/index.js@3567779、3562305、3622829、3623457、3568020
 
-#### POST /client/book/finished-task/list — 已完成任务分数
+#### GET /client/book/finished-task/list（PC）/ POST（H5） — 已完成任务分数
 
 - **域**：dsb-api.up366.cn
-- **鉴权**：需要 u3t
+- **鉴权**：TGT → 一次性 ST → `?ticket=`（见 `recon/wrongnote-h5.md` §1）
 - **用途**：换设备/重装后补齐本书的任务完成分数，避免本地 `TaskScore` 表为空导致进度全丢。
-- **调用点**：`Books.initChapter()` @3617392（`Ge.getByName("getBooksFinishedTaskList",{bookId})`）
+- **调用点**：
+  - PC：`Books.initChapter()` @3617392，`Ge.getByName("getBooksFinishedTaskList",{bookId})` → **GET**（`get` 把第二参作为 searchParams，@3575184）
+  - H5：`chunk-6b733b35.js@9507`、`chunk-39edd6e0.js@17926`，`post(url,{bookId})` → **POST**
 - **请求参数**：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| bookId | string | 教材 ID（`this.Id`） |
+| bookId | string | 教材 ID（PC 传 `this.Id`，H5 传页面 `bookId`） |
 
-- **响应**：`data` 为数组，每项至少含 `taskId`；客户端以 `data[].taskId` 为键，**整项**作为 `taskScore` 挂到任务上（`I.taskScore=s[I.Id]` @3618176）。`taskScore` 其余字段与本地 `TaskScore` 表结构对齐（bookId/taskId/type/pid/study/score/weight/percent/studyDate），但主进程只显式判断 `taskId`。
+- **方法差异**：PC 端只发 GET，H5 只发 POST；2026-11-05 未认证实测两种方法都返回 `code=-21` JSON（不是 404/405），说明网关两条路由都存在，服务端处理是否一致待有效凭证实测。**两端都不传 `courseId`**；库里的可选 `course_id` 无客户端依据。
+- **响应**：`data` 为数组，每项至少含 `taskId`；客户端以 `data[].taskId` 为键，**整项**作为 `taskScore` 挂到任务上（`I.taskScore=s[I.Id]` @3618176）。H5 另外用 `studyDate` 排序。`taskScore` 其余字段与本地 `TaskScore` 表结构对齐（bookId/taskId/type/pid/study/score/weight/percent/studyDate），但主进程只显式判断 `taskId`。
 - **备注**：仅**非离线模式**请求（`initChapter(e=!1)`，`e` 为真时跳过）；本地已有同 `taskId` 不覆盖（`s[g.taskId]||(s[g.taskId]=g)` @3617410）。失败只写日志"加载分数出错"，不弹窗不阻断。无 ut。
-- **证据**：main/index.js@3617392、3558520、3617410、3618176
+- **证据**：main/index.js@3617392、3558520、3617410、3618176、3575184；H5 chunk-6b733b35.js@9507、chunk-39edd6e0.js@17926
 
-#### GET /client/student/task/answer/detail — 任务作答详情
+#### GET /client/student/task/answer/detail（PC）/ POST /v2（H5） — 任务作答详情
 
 - **域**：dsb-api.up366.cn
-- **鉴权**：需要 u3t
-- **用途**：按任务取学生作答详情（服务端侧的答案与批改记录），用于错题回看 / 作答详情展示。
-- **调用点**：`mF.getTaskAnswerDetail(e)` @3572472（`getByName("taskAnswerDetail", e)`）
+- **鉴权**：TGT → 一次性 ST → `?ticket=`
+- **用途**：按任务取学生作答详情（试卷/标准答案/学生作答 XML），用于错题回看、作文报告导出。
+- **调用点**：
+  - PC：`mF.getTaskAnswerDetail(e)` @3572472（`getByName("taskAnswerDetail", e)` → GET + searchParams，@3575184）；唯一调用方 `ExportContinueWritingReport` @3768493，参数 `{courseId, bookId, taskId, uid}`。
+  - H5：`chunk-6c496ba5.js@892819`（mockexam 报告页，路由 `/mockexam/:uid/:bookId/:taskId`）→ **POST** `/client/student/task/answer/detail/v2`，参数 `{uid, bookId, taskId}`（无 `courseId`）。
 - **请求参数**：
 
-| 字段 | 类型 | 说明 |
+| 方法 | 字段 | 说明 |
 | --- | --- | --- |
-| （透传） | — | 代码中未显式构造参数对象，`e` 由调用方原样作为 query 传入；主进程内**未找到任何调用点**，只能经 IPC 代理被渲染层调用 |
+| PC GET | courseId / bookId / taskId / uid | 来自 `reportInfo` 与学生行；`uid` 是学生 uid |
+| H5 POST /v2 | uid / bookId / taskId | 来自路由参数；`courseId` 不是必填 |
 
-- **响应**：代码中未读取任何字段，整份响应原样返回调用方。
-- **备注**：**死代码嫌疑**——方法已定义但主进程无调用者，也无缓存。参数与响应均无本地约束，属纯透传通道。
-- **证据**：main/index.js@3572472、3561477
+- **响应**：PC 调用方读取 `data.paperInfo.paperData`、`data.userAnswer.markData`、`data.userAnswer.score`（@3768493 之后 `dealWithResult`）；H5 `showPaper` 读取 `data.paperInfo.{paperData,answerData,cdnPrefix}`、`data.userAnswer.{answerData,markData}`（@892912）。两版结构一致：`data.paperInfo` + `data.userAnswer`。
+- **备注**：此前 recon 判“死代码/主进程无调用点”是漏搜——调用点在 @3768493；v2 路径只存在于 H5 bundle，PC 安装包只有非 v2 路径（@3561535）。两版都返回完整 XML，客户端自行拼接。
+- **证据**：main/index.js@3561535、3572472、3575184、3768493；H5 chunk-6c496ba5.js@892819、@892912
 
 #### GET /client/paper/detail — 试卷详情
 
@@ -1176,7 +1183,8 @@ md5(T).slice(0,10) + md5( md5(tasksJson) + "submitTaskToken-pc-987654" + md5(T) 
 5. **`seconds` 上报后立即归零**（main/index.js@3876390 附近），配合 `e.seconds += 旧值` 累加，避免重启后重复计时；为 0 时兜底 `200`。
 6. **`u3t` 存的是 TGT 不是 ST**；ST 只在 `result.code ∈ {-21,-22}` 时临时取一次并拼 `?ticket=` 重放。`Authorization` 头全包无赋值点，是死头。
 
-另外两处死代码已在 §1.13 标注：`/download`（只用 `downloadUrl`，方法 `downloadByFileId` 无调用点）、`mF.getTaskAnswerDetail`（无调用点）。
+另外一处死代码已在 §1.13 标注：`/download`（只用 `downloadUrl`，方法 `downloadByFileId` 无调用点）。
+`mF.getTaskAnswerDetail` 原先被判无调用点，2026-11-05 已推翻：`ExportContinueWritingReport` @3768493 调用它，参数 `{courseId,bookId,taskId,uid}`（见 `recon/wrongnote-h5.md`）。
 
 ---
 
@@ -1190,20 +1198,22 @@ md5(T).slice(0,10) + md5( md5(tasksJson) + "submitTaskToken-pc-987654" + md5(T) 
 - 非 up366 域：**5 条**（fy.ismartin、fanyi.ismartlearning、hw-rpt-cloud-api、微信/QQ OAuth 各 1）+ 私有云 **5 条**。
 - **合计 56 条**；另有死配置（有 URL 常量、零调用点）**21 条**。
 
-**字段级复核后证伪的 5 条**
+**字段级复核后证伪的 4 条**
 
 | # | endpoint | 证伪理由 |
 |---|---|---|
 | 1 | `POST fs.up366.cn/download` | 下载只用 `/fileinfo` 返回的 `data.downloadUrl`；`downloadByFileId` 全 bundle 无调用点 |
 | 2 | `POST msg-api.up366.cn/client/msg/list-of-pc` | 包装方法 `pi.getMyMsg()` 不在 IPC 注册表，主进程无其它调用点 → 渲染层够不到 |
 | 3 | `POST mall-api.up366.cn/client/order/goods/validity` | 主进程无任何调用点 |
-| 4 | `GET dsb-api.up366.cn/client/student/task/answer/detail` | `mF.getTaskAnswerDetail` 无调用点 |
-| 5 | `GET /minicloud/update?model=…` | 无调用点 |
+| 4 | `GET /minicloud/update?model=…` | 无调用点 |
+
+> 2026-11-05 更正：原第 4 条 `GET /client/student/task/answer/detail` 不是死代码——`ExportContinueWritingReport` @3768493 调用它，
+> 参数 `{courseId,bookId,taskId,uid}`；同功能的 H5 `POST /v2` 见 `recon/wrongnote-h5.md`。该条从证伪表移除。
 
 另：`GET /front/health-status` 有 URL、有 `MainWindow.checkOnline()` 包装，但**未找到调用方**，存疑。
 
-**修正后口径**：主进程实际可发起的 endpoint ≈ **51 条**（up366 42 + 外部 5 + 私有云 4）。
-本文档字段级覆盖 **54 条**（§1.11 认证配置 22 / §1.12 教材任务评测 17 / §1.13 文件及其它 15），上述 5 条保留并标注为死代码，便于版本比对。
+**修正后口径**：主进程实际可发起的 endpoint ≈ **52 条**（up366 43 + 外部 5 + 私有云 4）。
+本文档字段级覆盖 **54 条**（§1.11 认证配置 22 / §1.12 教材任务评测 17 / §1.13 文件及其它 15），上述 4 条保留并标注为死代码，便于版本比对。
 
 ---
 

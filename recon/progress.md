@@ -89,3 +89,15 @@ frontend.md 全文 48 处 `@偏移` 已统一为「UTF-8 解码后字符下标�
 正确锚点（`static/login/login.bdb7e7c2.js`，字符下标）：@263810 `saveData("userInfo",{userName,password})` →
 @264933 `JSON.parse(Login.loadData("userInfo"))` → @265002 `this.form.password=n.password`。
 security.md 已单点更新至 45,430 B，全文 192433 出现 0 次，结论不变。
+
+## 2026-11-05 错题本（wrongnote-api）H5 实证
+
+- 新增 `recon/wrongnote-h5.md`：从 `student.up366.cn` H5 6.12.1 取全 10 个端点的 body/query/响应字段。
+- **鉴权更正**：wrongnote-api 用 TGT → 一次性 ST → `?ticket=`；H5 在 PC 客户端内由 Electron 拦截 sso 换票
+  （`preload/index.js@3640984` → `redirect://getServiceTicket` → PC TGT）。实测：无 ticket=`-21`、`ticket=INVALID`=`-22`、sso 无 TGT=`-23`。
+- **读/写更正**：`/student/questions/kill` 是读接口（取待消灭题包），不是写；真正写接口是 `/student/question/submit`。
+- `wrong_books` 的「全部/练习」是 H5 页面 UI 注入，不是服务端数据（`chunk-6ff8c6e6.js@12504`）。
+- `finished_tasks`：PC `GET {bookId}`（@3617392）、H5 `POST {bookId}`（chunk-6b733b35.js@9507、chunk-39edd6e0.js@17926）；
+  两端都不传 `courseId`；实测两种方法均返回 `-21` JSON（网关两条路由都存在）。
+- `answer_detail`：PC 调用点 `ExportContinueWritingReport` @3768493（此前误判为死代码），参数 `{courseId,bookId,taskId,uid}`；
+  H5 `POST /v2`（chunk-6c496ba5.js@892819）参数 `{uid,bookId,taskId}`；响应均为 `data.paperInfo` + `data.userAnswer`。

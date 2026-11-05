@@ -15,7 +15,7 @@ git checkout pyapi    # 注意：切换会把另一分支的工作区文件从�
 
 | 路径 | 内容 |
 |---|---|
-| `recon/` | 22 篇研究结论：客户端结构、加密、接口目录、安全评估、实机验证 |
+| `recon/` | 23 篇研究结论：客户端结构、加密、接口目录、安全评估、实机验证 |
 | `tools/` | 35 个复现脚本 + `fixtures/` 真实报文夹具，索引见 `tools/README.md` |
 | `harness/` | 客户端注入与运行时探针（Electron / asar / IPC） |
 | `docs/` | `library-api.md` 库 API 参考；`plans/` 历史实施计划 |
