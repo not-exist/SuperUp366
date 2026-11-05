@@ -419,11 +419,12 @@ def test_wrong_kill_paper_sends_expected_request(monkeypatch):
 
 
 def test_wrong_kill_paper_empty_data_returns_empty_dict(monkeypatch):
-    _install(monkeypatch, _ok({}))
+    for empty in ({}, []):
+        _install(monkeypatch, _ok(empty))
 
-    result = _session().wrong_kill_paper(book_id="1", stage_id=3, subject_id=2)
+        result = _session().wrong_kill_paper(book_id="1", stage_id=3, subject_id=2)
 
-    assert result == {}
+        assert result == {}
 
 
 # --- writes (strict dry_run, never real) ---------------------------------

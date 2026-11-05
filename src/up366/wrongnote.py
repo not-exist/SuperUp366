@@ -563,6 +563,9 @@ class WrongNoteAPI:
                 "endTime": self._time_value(end_time),
             },
         )
+        data = payload.get("data")
+        if data in (None, {}, []):
+            return {}
         return self._dict_data(payload)
 
     # --- writes (destructive, strictly gated) ----------------------------
