@@ -126,5 +126,7 @@ security.md 已单点更新至 45,430 B，全文 192433 出现 0 次，结论不
   answer_detail v1+v2 / wrongnote 全部读接口 / finished_tasks。
 - `personalized_chapters`：4 本书全部 `-4 no_auth_zuul`；PC 的 `updatePersonalized()` 同样忽略非 0，
   属账号/书籍权限，不是协议错误。
+- `book_plan` 在 course 9222783 / book DC608A… 返回 3 行；`chapter_questions` 对抽样章节返回空列表（该章节无题目）；
+  `paper_zip_info` 返回 `downloadurl/fileId/...`，`paper_detail` 返回 24,362 字符 XML。
 - `test_all_data`：用 contentId/jobId/paperId 当 testId 均 `code=1 参数不合法`；需要真实在线测评 testId，
   本次抽样作业未找到，未做成功路径验证。
