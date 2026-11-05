@@ -142,7 +142,7 @@ Vite SPA 自身 **0 条直连 HTTP**——业务全部走 preload 暴露的全�
 - 登录态：token 落地在 `{saveDir}/setup.cfg` 的 **SQLCipher** 库，`PRAGMA key` 硬编码 `{3E2A243F-7B8B-45C8-9E7D-885A891820A7}`；TGT/ST 仅内存。
 - **无 WebSocket / 无 SSE / 无长连接**，全部请求-响应 + 定时轮询（minicloud status 10s、二维码状态由渲染层轮询）。
 - 环境切换靠 Proxy 把字面量 `up366.cn` 替换为 `up366.com.cn` / `up366demo.cn` / `up366test.cn`。
-- 错题本（`wrongnote-api`，10 个端点）的 H5 侧字段、鉴权链与 `questions/kill` 读/写纠正在 `recon/wrongnote-h5.md`（2026-11-05 补）。
+- 错题本（`wrongnote-api`，10 个端点）的 H5 侧字段、鉴权链与 `questions/kill` 读/写纠正在 `recon/wrongnote-h5.md`（2026-11-05 补；同日用测试账号只读验证，写接口仅 dry-run）。
 
 ---
 
