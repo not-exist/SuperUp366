@@ -12,7 +12,7 @@
 - 每请求固定 7 个头：`user-agent: PC-Up366-Student 6.11.0`、`x-requested-with: PC`、`X-App-Name: student-pc`、`clientId: <MachineCode>`、`u3r: <每请求新随机 UUID>`、`u3t: <TGT>`、`Authorization: <恒为空串>`。
 - **没有对每个请求做签名**；只有**登录/短信/上传任务成绩**这类敏感接口带一个 `ut` 字段：`ut = md5(ts).slice(0,10) + md5(payload + 关键词 + md5(ts)) + md5(ts).slice(10)`。
 - 唯一真正的 HMAC 是文件元信息接口：`HMAC-SHA1(key="au66ssoI3nGr6DxCHk8KcpVsQ1wYNQId", msg="GETOBJECTschool"+fileIds) → base64`。
-- 鉴权靠 **TGT(`u3t` 头) + 一次性 ST(`?ticket=` query)**，不是 JWT/Bearer。
+- 业务 host 的主要凭证是**登录 Cookie**：`UP366-C`、`CASTGC`（`Domain=.up366.cn`）。2026-11-05 实测仅 Cookie 即可访问 `courses` / `jobs` / `job_info` / `books` / `finished_tasks` / `wrongnote`，**仅 `u3t` 返回 `-21`**；`SESSION` 只作用于 `sso.up366.cn`。PC 客户端仍随请求发 `u3t`，并在 Cookie 缺失/过期、业务返回 `-21/-22` 时用它向 sso 换一次性 ST、以 `?ticket=` 重放（不是 JWT/Bearer）。下文各节写的“需要 u3t”应理解为“PC 客户端随请求携带 u3t”，不代表 u3t 单独可鉴权。
 - 无 WebSocket / 无 SSE，全部是请求-响应 + 定时轮询。
 - **字段级说明见 §1.11（认证 22 条）/ §1.12（教材任务 17 条）/ §1.13（文件及其它 15 条）/ §1.14（答题提交链路）。**
 

@@ -112,3 +112,9 @@ security.md 已单点更新至 45,430 B，全文 192433 出现 0 次，结论不
 - `finished_tasks`：GET 与 POST 同 `bookId` 返回完全相同的行；`courseId` 被忽略。
 - `answer_detail`：v1/v2 都需要 `{courseId,uid,bookId,taskId}`；`taskId` 取 `contentId`；v2 缺 `courseId` 报 `param_missing`。
 - 写接口 `question/submit` 只做 dry-run，未真实提交（会改动账号数据）。
+
+### 2026-11-05 鉴权模型更正（跨 host）
+
+- 抽测 `course-api` / `studytask-api` / `book-api` / `dsb-api` / `wrongnote-api`：仅登录 Cookie 全部 `code=0`；
+  仅 `u3t` 全部 `code=-21`。业务 host 的主凭证是 Cookie（`UP366-C`/`CASTGC`，`Domain=.up366.cn`），
+  `u3t` 只在 Cookie 缺失/过期时用于向 sso 换 ST。此前 recon 的“鉴权靠 u3t”表述已更正。

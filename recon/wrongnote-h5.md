@@ -94,6 +94,8 @@ curl -sS -X POST 'https://sso.up366.cn/v1/serviceTicket' \
 
 登录响应实际下发 3 个 Cookie：`UP366-C`、`CASTGC`（`Domain=.up366.cn`）与 `SESSION`（`Domain=sso.up366.cn`）。wrongnote-api 只能收到前两个；实测仅 Cookie 即可，说明 `UP366-C`/`CASTGC` 已足够。
 
+同一抽测还覆盖 `course-api`（courses）、`studytask-api`（jobs/job_info）、`book-api`（books）、`dsb-api`（finished_tasks）：**仅 Cookie 全部 `code=0`，仅 `u3t` 全部 `code=-21`**。即 Cookie 是业务 host 的主凭证，`u3t` 只在换 ST 时使用。
+
 ## 2. 端点全表（H5 6.12.1）
 
 H5 源码中的模块 `61f5`（每个入口 bundle 都内联一份，函数体一致）：
