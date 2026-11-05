@@ -4,7 +4,7 @@
 
 > 只描述代码里**真实存在**的公开 API。以下划线开头的方法为内部实现，**非公开 API**，本文不作 API 介绍。标「本批新增 / 实验性 / 未验证」者按标注理解，勿凭名称臆测其已在线上确认。
 
-本轮（catalog rewrite）把端点收拢到 `endpoints.py`（冻结 `Endpoint` dataclass + `ENDPOINTS` 字典，31 条），并新增课本 / 普通作业 / 错题本三组方法，来自 `book.py` / `job_api.py` / `wrongnote.py` 三个 mixin（`class Up366(BookAPI, WrongNoteAPI, JobAPIMixin)`）。
+本轮（catalog rewrite）把端点收拢到 `endpoints.py`（冻结 `Endpoint` dataclass + `ENDPOINTS` 字典，32 条），并新增课本 / 普通作业 / 错题本三组方法，来自 `book.py` / `job_api.py` / `wrongnote.py` 三个 mixin（`class Up366(BookAPI, WrongNoteAPI, JobAPIMixin)`）。
 
 ## 1. 安装与导入
 
@@ -118,7 +118,7 @@ if pk is not None:
 | 本批新增·课本 | `personalized_chapters(book_id)` | `dict` |
 | 本批新增·课本 | `offline_books()` | `list[str]` |
 | 本批新增·课本 | `book_plan(course_id, book_id, *, book_type=1)` | `list[dict]` |
-| 本批新增·作业 | `finished_tasks(book_id, course_id=None)` | `list[dict]` |
+| 本批新增·作业 | `finished_tasks(book_id)` | `list[dict]` |
 | 本批新增·作业 | `answer_detail(params, *, use_v2=True)` | `dict` |
 | 本批新增·作业 | `test_all_data(test_id, uid)` | `dict` |
 | 本批新增·作业 | `paper_zip_info(paper_id)` | `dict` |
@@ -134,8 +134,9 @@ if pk is not None:
 | 本批新增·错题 | `wrong_knowledge(*, book_id="0", stage_id, subject_id, start_time=None, end_time=None, order_type="desc", order_field="wrongTimes", page=1, page_size=100)` | `WrongNotePage` |
 | 本批新增·错题 | `wrong_courses(*, stage_id, subject_id)` | `list[WrongCourse]` |
 | 本批新增·错题 | `wrong_rank(*, course_id, order_type="desc", order_field="wrongCount", page=1, page_size=100)` | `WrongNotePage` |
-| 本批新增·错题 | `wrong_killed_questions(**params)` / `wrong_question_show(**params)` | `WrongNotePage`（实验性） |
-| 本批新增·错题 | `kill_wrong_questions(payload, *, dry_run=True, confirm=False)` | `dict` |
+| 本批新增·错题 | `wrong_killed_questions(*, book_id, uid, stage_id, subject_id, kill_flag, start_time=None, end_time=None, page=1, page_size=10)` | `WrongNotePage` |
+| 本批新增·错题 | `wrong_question_show(*, stage_id, subject_id, book_id, qtype_id, knowledge_id, start_time=None, end_time=None, page=1, page_size=10)` | `WrongNotePage` |
+| 本批新增·错题 | `wrong_kill_paper(*, book_id, stage_id, subject_id, start_time=None, end_time=None)` | `dict`（读） |
 | 本批新增·错题 | `submit_wrong_question(payload, *, dry_run=True, confirm=False)` | `dict` |
 
 > `Up366(...)` 构造为全关键字：`username, password_hash, tgt, client_id, user_type=None, cookies=None`；普通使用请通过 `login()` 创建。
@@ -186,16 +187,17 @@ submit_word_pk(job: Job, score: int,
 
 只读查询 + 两类写接口（写接口默认 dry-run，见第 8 节）。
 
-- 只读：`finished_tasks(book_id, course_id=None)` 已完成任务分数（当前只发 POST，`fallback="GET"` 仅声明未接线；PC 源码侧为 GET 且仅传 `bookId`，服务端双接受与 `courseId` 语义待实测，见第 9 节）；`answer_detail(params, *, use_v2=True)` 作答详情（`params` 原样透传，**参数未验证**）；`test_all_data(test_id, uid)` 测评全量数据（读 `data.testInfo.paperId`）；`paper_zip_info(paper_id)` 试卷包地址 / 版本；`paper_detail(paper_id)` 返回 **`data.paperData` 的 XML 字符串**（非 dict）；`chapter_questions(book_id, chapter_id, file_id)` 章节题目；`task_linked(book_id, task_id, *, type=1)` 任务关联目录；`job_status(course_id, job_id, content_id, book_id)` → `JobStatus`（复用 `job_info` 端点、**不新增端点行**，把 `data` 交给 `JobStatus.from_dict()`，返回模型而非原始 dict；请求体与 `job_info` 完全相同，`studyTaskId` 恒等于 `job_id`）。
+- 只读：`finished_tasks(book_id)` 已完成任务分数（只传 `bookId`；H5 用 POST、PC 用 GET，网关两条路由都接受，本库走 POST）；`answer_detail(params, *, use_v2=True)` 作答详情（两版参数相同：`{courseId,uid,bookId,taskId}`；`use_v2=True` → POST `/v2`，`use_v2=False` → GET 非 v2；响应均为 `data.paperInfo` + `data.userAnswer`）；`test_all_data(test_id, uid)` 测评全量数据（读 `data.testInfo.paperId`）；`paper_zip_info(paper_id)` 试卷包地址 / 版本；`paper_detail(paper_id)` 返回 **`data.paperData` 的 XML 字符串**（非 dict）；`chapter_questions(book_id, chapter_id, file_id)` 章节题目；`task_linked(book_id, task_id, *, type=1)` 任务关联目录；`job_status(course_id, job_id, content_id, book_id)` → `JobStatus`（复用 `job_info` 端点、**不新增端点行**，把 `data` 交给 `JobStatus.from_dict()`，返回模型而非原始 dict；请求体与 `job_info` 完全相同，`studyTaskId` 恒等于 `job_id`）。
 - 写：`submit_task_score(job, row, *, submit_type="0", dry_run=True, confirm=False, verify=True)`（`verify=True` 提交成功后回读 `job_status()` 校验，不自动重提）；`submit_online_test(row, *, dry_run=True, confirm=False)`。
 
 ### 4.6 本批新增 · 错题本 API（`WrongNoteAPI`）
 
-> ⚠ 本组 `wrongnote-api` 的**鉴权方式、请求参数是否被线上接受、写接口 / 两个 show 的 payload 均未通过实包验证**（见第 9 节）。分页类方法返回 `WrongNotePage`。
+> 本组已按 H5 6.12.1 源码与真实账号只读 e2e 核实：**登录 Cookie 或一次性 ST `?ticket=` 任一即可鉴权，`u3t` 单独无效**；10 个端点的 body/query/响应见 `recon/wrongnote-h5.md`。分页类方法返回 `WrongNotePage`。
 
 - `wrong_subjects()` → `list[WrongSubject]`；`wrong_subject_stat(*, book_id="0", stage_id, subject_id, start_time=None, end_time=None)` → `WrongSubjectStat`；`wrong_books(*, stage_id, subject_id)` → `list[WrongBook]`；`wrong_courses(*, stage_id, subject_id)` → `list[WrongCourse]`。
-- 分页：`wrong_knowledge(...)`（`order_field` 默认 `wrongTimes`）、`wrong_rank(*, course_id, ...)`（`order_field` 默认 `wrongCount`）→ `WrongNotePage`。
-- 实验性（**payload 未验证**）：`wrong_killed_questions(**params)` / `wrong_question_show(**params)` → `WrongNotePage`；`kill_wrong_questions(payload, *, dry_run=True, confirm=False)`、`submit_wrong_question(payload, *, dry_run=True, confirm=False)`（写）。
+- 分页：`wrong_knowledge(...)`（`order_field` 默认 `wrongTimes`）、`wrong_rank(*, course_id, ...)`（`order_field` 默认 `wrongCount`）→ `WrongNotePage`；两者都把 pager 同时放进 form body 与 query（与 H5 一致）。
+- 题包：`wrong_killed_questions(...)`（已消灭）、`wrong_question_show(...)`（剩余）→ `WrongNotePage`，`items` 为 `WrongQuestion`；`wrong_kill_paper(...)`（待消灭题包，**读**）→ `dict`。
+- 写：`submit_wrong_question(payload, *, dry_run=True, confirm=False)`；payload 固定为 `uid/result/startTime/endTime/seconds/rightQstIds` 六项。
 
 ## 5. 模型参考
 
@@ -239,15 +241,13 @@ from up366.wrongnote import (WrongSubject, WrongSubjectStat, WrongBook, WrongKno
 |---|---|---|
 | `WrongSubject` / `WrongSubjectStat` | `wrong_subjects()` / `wrong_subject_stat()` | 学科条目 / 学科统计 |
 | `WrongBook` / `WrongKnowledge` | `wrong_books()` / `wrong_knowledge()` 分页 | 教材条目 / 知识点条目 |
-| `WrongQuestion` | 预留模型（**当前无方法返回**）；两个实验性 show 方法返回 `items` 为原始 dict 的 `WrongNotePage` | 题目条目（薄封装，仅 `question_id`） |
-| `WrongNotePage` | `wrong_knowledge()` / `wrong_rank()` / 两个 show 方法 | 分页容器：`items`（`WrongKnowledge` / `WrongRank` 实例或原始 dict）+ `pager` 字段 / `has_next` |
-| `WrongCourse` / `WrongRank` | `wrong_courses()` / `wrong_rank()` 分页 | 课程条目 / 排行条目 |
-
-> `WrongQuestion` 目前仅定义、导出，未被任何方法实例化；两个 show 方法返回原始 dict 项的 `WrongNotePage`。
+| `WrongQuestion` | `wrong_killed_questions()` / `wrong_question_show()` 的 `items` | 题目条目（薄封装，仅 `question_id`，其余字段在 `raw`） |
+| `WrongNotePage` | `wrong_knowledge()` / `wrong_rank()` / 两个 show 方法 | 分页容器：`items`（模型实例）+ `pager` 字段 / `has_next` / `offset`；空 `data={}` 返回空页 |
+| `WrongCourse` / `WrongRank` | `wrong_courses()` / `wrong_rank()` 分页 | 课程条目 / 排行条目（`WrongRank` 暴露 `realname` / `wrong_count` / `killed_count` / `recent_killed_count`） |
 
 ## 6. Endpoint 全表
 
-所有业务请求带第 3.2 节 7 个头与 `cookies`；响应按 `result.code` 判断（0 成功、`-21/-22` 自动换 ST 重放一次）。默认超时 `DEFAULT_TIMEOUT = 20.0` 秒。目录见 `endpoints.py: ENDPOINTS`（31 条冻结 `Endpoint`：默认 `POST` / `body=form` / `write=False`，可带 `fallback` / `write`）。下表按 host 分组（顺序：sso、course-api、studytask-api、book-api、dsb-api、xot-api、qlib-api、study-api、wordsbtl-api、words-v2-api、wrongnote-api）；sso 两条为 `client.py` 常量，不在字典内。`params` 为请求参数语义，`returns` 为取用字段。
+所有业务请求带第 3.2 节 7 个头与 `cookies`；响应按 `result.code` 判断（0 成功、`-21/-22` 自动换 ST 重放一次）。默认超时 `DEFAULT_TIMEOUT = 20.0` 秒。目录见 `endpoints.py: ENDPOINTS`（32 条冻结 `Endpoint`：默认 `POST` / `body=form` / `write=False`，可带 `fallback` / `write`）。下表按 host 分组（顺序：sso、course-api、studytask-api、book-api、dsb-api、xot-api、qlib-api、study-api、wordsbtl-api、words-v2-api、wrongnote-api）；sso 两条为 `client.py` 常量，不在字典内。`params` 为请求参数语义，`returns` 为取用字段。
 
 | Host | 方法 | Path | params | returns | 对应方法 / 备注 |
 |---|---|---|---|---|---|
@@ -265,8 +265,9 @@ from up366.wrongnote import (WrongSubject, WrongSubjectStat, WrongBook, WrongKno
 | book-api | POST | `/front/offline/download/books` | 空 body（`body=none`） | `data.bookIds` | `offline_books()` |
 | book-api | POST | `/client/chapters/list-question-file` | `{bookId, chapterId, fileId}` | `data.dirQuestions` | `chapter_questions()` |
 | book-api | POST | `/client/task/linked` | `{bookId, taskId, type:1}` | `data.chapters` | `task_linked()` |
-| dsb-api | POST | `/client/book/finished-task/list` | `{bookId}`（可选 `courseId`） | `data` 数组（`[].taskId` 为键） | `finished_tasks()`；`fallback="GET"` 仅声明未接线、当前只发 POST；PC 源码侧为 **GET + 仅 `bookId`**（`index.js@3617392`），POST 双接受 / `courseId` 语义待实测，见第 9 节 |
-| dsb-api | POST / GET | `/client/student/task/answer/detail/v2` | `params` 原样透传 | `data` 对象 | `answer_detail()`；`use_v2=False` 改用 GET + query（**同一 `/v2` 路径**）；参数未验证 |
+| dsb-api | POST（H5）/ GET（PC） | `/client/book/finished-task/list` | `{bookId}` | `data` 数组（`[].taskId` 为键） | `finished_tasks()`；两端都只传 `bookId`，本库走 POST |
+| dsb-api | POST | `/client/student/task/answer/detail/v2` | `{courseId,uid,bookId,taskId}` | `data.paperInfo` + `data.userAnswer` | `answer_detail(use_v2=True)`；H5 变体（`courseId` 来自父路由，缺省报 `param_missing`） |
+| dsb-api | GET | `/client/student/task/answer/detail` | `{courseId,bookId,taskId,uid}` | 同上 | `answer_detail(use_v2=False)`；PC 变体 |
 | xot-api | POST | `/client/onlinetesting/alldata` | `{testId, uid}` | `data.testInfo.paperId` | `test_all_data()` |
 | xot-api | POST | `/client/paper/zipinfo` | `{paperId}` | `data.downloadurl` / `data.fileId` | `paper_zip_info()` |
 | xot-api | POST | `/client/onlinetesting/submit` | 整行成绩 + `testId` | `result.code` | `submit_online_test()`（write） |
@@ -276,16 +277,16 @@ from up366.wrongnote import (WrongSubject, WrongSubjectStat, WrongBook, WrongKno
 | words-v2-api | POST | `/client/sync/teaching/bucket/detail-info` | `{source:1, bucketId}` | `data.contentList[].entryList[]` | `bucket_words()` |
 | wrongnote-api | POST | `/client/wrongnote/student/subject/list` | — | 学科列表 | `wrong_subjects()` |
 | wrongnote-api | POST | `/client/wrongnote/student/subject/stat` | `bookId,stageId,subjectId,startTime,endTime` | 统计 | `wrong_subject_stat()` |
-| wrongnote-api | POST | `/client/wrongnote/student/book/list` | `stageId,subjectId` | 教材列表（代码另注入「全部」/「练习」哨兵项） | `wrong_books()` |
-| wrongnote-api | POST | `/client/wrongnote/student/knowledge/list/v3` | `bookId,stageId,subjectId,startTime,endTime,orderType,orderField,pager.pageSize,pager.currentPage` | `data.list`/`pager` | `wrong_knowledge()` |
+| wrongnote-api | POST | `/client/wrongnote/student/book/list` | `stageId,subjectId` | 教材列表（库为对齐 UI 另注入「全部」/「练习」哨兵项） | `wrong_books()` |
+| wrongnote-api | POST | `/client/wrongnote/student/knowledge/list/v3` | body: `bookId,stageId,subjectId,startTime,endTime,orderType,orderField,pager.pageSize,pager.currentPage`；query: `pager.currentPage,pager.pageSize` | `data.list`/`pager` | `wrong_knowledge()` |
 | wrongnote-api | POST | `/client/wrongnote/student/course/list` | `stageId,subjectId` | 课程列表 | `wrong_courses()` |
-| wrongnote-api | POST | `/client/wrongnote/v2/rank/list` | `courseId,orderType,orderField,pager.pageSize,pager.currentPage` | `data.list`/`pager` | `wrong_rank()` |
-| wrongnote-api | POST | `/client/wrongnote/kill/question/show` | `**params` | 分页 | `wrong_killed_questions()`（实验性） |
-| wrongnote-api | POST | `/client/wrongnote/student/question/show` | `**params` | 分页 | `wrong_question_show()`（实验性） |
-| wrongnote-api | POST | `/client/wrongnote/student/questions/kill` | `payload` | — | `kill_wrong_questions()`（write，未验证） |
-| wrongnote-api | POST | `/client/wrongnote/student/question/submit` | `payload` | — | `submit_wrong_question()`（write，未验证） |
+| wrongnote-api | POST | `/client/wrongnote/v2/rank/list` | body: `courseId,orderType,orderField,pager.pageSize,pager.currentPage`；query: `pager.currentPage,pager.pageSize` | `data.list`/`pager`（行含 `realname,wrongCount,killedCount,recentKilledCount`） | `wrong_rank()` |
+| wrongnote-api | POST | `/client/wrongnote/kill/question/show` | `{bookId,uid,stageId,subjectId,killFlag,pager.pageSize,pager.currentPage[,startTime,endTime]}` + query pager | 题包 `data.{pathPrefix,paperData,answerData,userAnswerData,list,pager}` | `wrong_killed_questions()`（读） |
+| wrongnote-api | POST | `/client/wrongnote/student/question/show` | `{stageId,subjectId,bookId,qtypeId,knowledgeId,startTime,endTime,pager.pageSize,pager.currentPage}` + query pager | 同上 | `wrong_question_show()`（读） |
+| wrongnote-api | POST | `/client/wrongnote/student/questions/kill` | `{bookId,stageId,subjectId,startTime,endTime}` | 题包 `data.{pathPrefix,paperData,answerData}` | `wrong_kill_paper()`（**读**：取待消灭题包） |
+| wrongnote-api | POST | `/client/wrongnote/student/question/submit` | `{uid,result,startTime,endTime,seconds,rightQstIds}` | `result.code` | `submit_wrong_question()`（write） |
 
-> ⚠ **wrongnote-api 整组**：路径来自 `endpoints.py`、请求字段来自 `wrongnote.py`（`pager###pageSize` 等经 `form_encode` 展平为 `pager.pageSize`），但**是否被线上接受未验证**；鉴权（H5 Web SPA 的 cookie/ST 与 PC 端 `u3t` 头是否通用）与写接口 / 两个 show 的 payload 同样未验证，见第 9 节。另：PC 安装包内错题本是远端 webview（`preload/index.js@3663212` 的 `student.up366.cn/#/wrongNote`），`extract/` 全树**无** `/client/wrongnote/` 请求代码，故本组证据只能来自 H5 bundle / 实包。字段级线索见 `recon/api.md §1.4`、`recon/frontend.md`。
+> **wrongnote-api 整组**：路径与字段已由 H5 6.12.1 源码核实（`recon/wrongnote-h5.md`）；请求体里的 `pager###pageSize` 经 `form_encode` 展平为 `pager.pageSize`，H5 另把同样的 pager 放进 query。鉴权用登录 Cookie 或 ST `?ticket=` 任一即可（`u3t` 单独无效）：PC 客户端的 H5 webview 由 Electron 拦截 sso 换票（`preload/index.js@3640984` → `redirect://getServiceTicket`）。写接口仍会真实改动账号数据，务必先 dry-run。
 
 ## 7. 错误处理
 
@@ -345,28 +346,25 @@ except ValueError as e:
 
 **8.3 写接口 dry-run（默认零请求）**
 
-写方法 `submit_task_score` / `submit_online_test` / `kill_wrong_questions` / `submit_wrong_question` 默认 `dry_run=True, confirm=False`：只构造并返回预览 payload（`endpoint` / `url` / `data`，`submit_task_score` 另有 `tasks_json`），**零网络请求**；须同时 `dry_run=False` **且** `confirm=True` 才真正发送，二者缺一不发。
+写方法 `submit_task_score` / `submit_online_test` / `submit_wrong_question` 默认 `dry_run=True, confirm=False`：只构造并返回预览 payload（`endpoint` / `url` / `data`，`submit_task_score` 另有 `tasks_json`），**零网络请求**；须同时 `dry_run=False` **且** `confirm=True` 才真正发送，二者缺一不发。
 
 ```python
 preview = session.submit_task_score(job, row, dry_run=True)   # 零请求，返回 payload
 result = session.submit_task_score(job, row,
         dry_run=False, confirm=True, verify=True)             # 真正发送（verify 回读校验）
-# 错题写同理（payload 未验证，务必先 dry-run 复核）：
-preview = session.kill_wrong_questions(payload, dry_run=True)
-# result = session.kill_wrong_questions(payload, dry_run=False, confirm=True)
+# 错题写同理（payload 字段见 4.6，务必先 dry-run 复核）：
+preview = session.submit_wrong_question(payload, dry_run=True)
+# result = session.submit_wrong_question(payload, dry_run=False, confirm=True)
 ```
 
 ## 9. 已知限制
 
-> 「未验证」指逆向资料或推断，尚未用真实登录态对线上服务确认，勿当作已确认事实。
+> 2026-11-05 已用测试学生账号完成**只读** e2e；下面标「已确认」的条目均已线上验证，未标注的仍是逆向推断。
 
-- **`wrongnote-api` 鉴权未验证（且 PC 安装包内无对应请求代码）**：官方 PC 客户端的错题本是**远端 webview 页面**，不是本地 HTTP 调用 —— `extract/app.u3a/dist/preload/index.js@3663212` 的 `wrongNote="https://student.up366.cn/#/wrongNote"` 只是 H5 URL；同文件 `@4079996` 的 `launchXotEngine` 与 `@4108785` 的 `ShowOnlinePage` 拼的是 `${config.wrongNote}/${bookId}/wrong/${stageId}/${subjectId}/3` 这类 hash 路由，再 `MainWindow.showView("study",{url})` 打开 webview；`extract/res/assets/main.3da643cd.js@18429` 的「错题&生词」按钮走 `goToUrl("wrongNote")`。全 `extract/` 树搜 `/client/wrongnote/` **0 命中**（唯一 `wrongnote-api` 字样是 `extract/res/xotFullScreen/js/app.1ae30858.js@1316840` 的环境域名常量表，且为 `http://`）。因此 10 个端点与鉴权细节只能来自 H5 bundle（`work/h5/`）或实包：H5 走 cookie / ST 体系，本库按 PC `u3t` 头 + cookies 发送，是否通用**需抓 H5 或实包确认**，可能不生效。
-- **错题写接口 payload 未验证**：`kill_wrong_questions` / `submit_wrong_question` 及 `wrong_killed_questions` / `wrong_question_show` 请求体字段属实验性推断，务必先 `dry_run=True` 复核。
-- **`answer_detail` / v2 参数未验证**：`params` 透传，线上确切参数集未证实；`use_v2` 只切换 POST / GET 请求方法（同一 `/v2` 路径），依据见 `recon/api.md`。补充：PC 安装包里只有**非 `/v2`** 的 `taskAnswerDetail="https://dsb-api.up366.cn/client/student/task/answer/detail"`（`extract/app.u3a/dist/main/index.js@3561519`），且 `getTaskAnswerDetail(e)` 是 `getByName` → GET + 参数透传、全 bundle 无调用点；`/v2` 路径只存在于 H5 bundle。
-- **`finished_tasks` 方法与参数：客户端侧已确认 / 服务端侧待实测**（拆分说明）：
-  - **已确认**（`extract/app.u3a/dist/main/index.js@3617392`、`@3575184`）：官方 PC 客户端走 `getByName` → **GET**；`Books.initChapter()` 调 `Ge.getByName("getBooksFinishedTaskList",{bookId:this.Id})`，**只传 `bookId`、不传 `courseId`**，且仅非离线模式发起、失败只写日志不抛异常。
-  - 本库 `endpoints.py` 把该端点声明为 `method="POST"` 且带 `fallback="GET"` 元数据，并允许可选 `course_id`；POST 的依据是 H5 bundle 的 `.post(...)` 与 `recon/readaloud-runbook.md:114` 的实包记录，**不是** PC 客户端源码。**注意**：`fallback` 目前只是 catalog 元数据 —— `job_api.py:48-58` 的 `finished_tasks()` 只读 `endpoint.method`、未读 `endpoint.fallback`，即**当前只发一次 POST，GET 兜底未接线**（全库仅 `submit_word_pk` 在 `client.py:435` 实现了 404/405→GET 回退）。
-  - **待实测**：服务端是否真正同时接受 POST 与 GET，以及额外的 `courseId` 被忽略还是影响结果。确认前建议不传 `course_id`；若 POST 不通，需自行改用 GET 或后续为该方法接上兜底（当前版本不会自动回退）。
+- **`wrongnote-api` 鉴权已确认**：H5 6.12.1 的 axios 封装在 `-21/-22` 时向响应里的 `data.serverTicketUrl` POST `{service:<原 URL>}`，再把 `?ticket=` 拼回原 URL 重放；PC 客户端的 webview 由 Electron 拦截该 sso 请求并用 PC TGT 换票。2026-11-05 实测矩阵：仅 Cookie=`0`、仅 `?ticket=`=`0`、仅 `u3t`=`-21`、无凭证=`-21` → **Cookie 或 ST 任一即可，`u3t` 单独无效**。本库同时带 Cookie/u3t 并保留 ST 重试，可用。
+- **错题写接口 payload 已确认**：`submit_wrong_question` 的 `uid/result/startTime/endTime/seconds/rightQstIds` 六个字段来自 H5 `question/submit`（`recon/wrongnote-h5.md` §3.3）；`questions/kill` 是**读**接口，已从写接口改为 `wrong_kill_paper()`。写接口仍会真实改动账号数据，默认 dry-run。
+- **`answer_detail` 参数已确认**：两版都是 `{courseId,uid,bookId,taskId}`；`use_v2=True` → POST `/v2`（H5 的 `courseId` 来自父路由，缺省报 `param_missing`），`use_v2=False` → GET 非 v2（PC 调用点 `main/index.js@3768493`）。`taskId` 取 `contentId`（不是 `jobId`）；响应均为 `data.paperInfo` + `data.userAnswer`。2026-11-05 用真实账号只读实测通过。
+- **`finished_tasks` 方法与参数已确认**：PC 用 GET、H5 用 POST，两端都只传 `bookId`；2026-11-05 真实账号实测两种方法返回完全相同的行，额外 `courseId` 被忽略。本库走 POST，删除了无依据的 `courseId` 参数。
 - **无隐式缓存**：官方客户端对 `book/info` / `task/linked` / 离线书籍做 2h 或 SQLite 缓存，本库每次发真实请求，不缓存。
 - **无自动重登 / TGT 刷新**：登录态过期需重新 `login()`；`password_hash` 已存但无重登方法。
 - **写接口默认不真实写入**：默认 `dry_run=True` 且零请求，须 `dry_run=False` + `confirm=True`（第 8 节）；单词 PK 提交是唯一默认即发送的写入口。
@@ -390,11 +388,11 @@ python -m pytest -q     # 仓库根目录
 | `-23`（没有 TGT） | `serviceTicket` 需要有效 `u3t` | 手工构造 `Up366` 时 `tgt` 为空触发；请通过 `login()` 创建或填入有效 TGT |
 | 一直被判未登录 | 丢了会话 Cookie | `UP366-C / CASTGC / SESSION` 须随每次请求携带；本库自动 `cookies.update`，手工构造会话要自己传入 |
 | `-13`（重复作答 / 次数用尽） | 服务端按 `(uid, studyTaskId)` 判重，同一作业只有一次机会 | 作为 `Up366APIError(code=-13)` 抛出，**不自动重试**；勿重复提交同一 job |
-| `Up366HTTPError` 非 200 | 服务端返回 HTTP 错误状态 | 直接抛出；仅 `submit_word_pk` 在 404/405 转 GET 兜底；`finished_tasks` 的 `fallback="GET"` **未接线**、不会自动回退（见第 9 节） |
+| `Up366HTTPError` 非 200 | 服务端返回 HTTP 错误状态 | 直接抛出；仅 `submit_word_pk` 在 404/405 转 GET 兜底 |
 | POST→GET 兜底 / URL 过长 | `submit_word_pk` POST 被拒（404/405）或 GET 把 `submitJson` 拼进 query | 默认走 POST 无此问题；GET 兜底用紧凑词记录，控制词表规模 / 更少字段 |
 | `ValueError: job is not a word PK job` | 传了普通作业给 `submit_word_pk` | 先用 `job.is_word_pk` 过滤；发送前本地校验 |
 | `TypeError: job must be a Job instance` | 传了 dict 而非 `Job` | `jobs()` 返回 `Job`；`courses()` 返回 dict |
 | `Up366ResponseError: ... is not a list` | 服务端返回结构变化 | 本库按 `data.list` / `data.allTaskList` / `data.list+pager` 严格解析 |
-| 错题本接口返回异常 / 未登录 | `wrongnote-api` 鉴权或 payload 未验证 | 见第 9 节；先 `dry_run=True` 复核，必要时抓包确认 |
+| 错题本接口返回异常 / 未登录 | TGT 过期、ST 换票失败或 payload 不符 | 见第 9 节；读接口会自动换 ST，写接口先 `dry_run=True` 复核 |
 
 > 更多协议细节见 `recon/api.md`、`recon/feature-word-pk.md`、`recon/frontend.md`、`recon/readaloud-runbook.md`。
