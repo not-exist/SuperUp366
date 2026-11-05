@@ -118,3 +118,13 @@ security.md 已单点更新至 45,430 B，全文 192433 出现 0 次，结论不
 - 抽测 `course-api` / `studytask-api` / `book-api` / `dsb-api` / `wrongnote-api`：仅登录 Cookie 全部 `code=0`；
   仅 `u3t` 全部 `code=-21`。业务 host 的主凭证是 Cookie（`UP366-C`/`CASTGC`，`Domain=.up366.cn`），
   `u3t` 只在 Cookie 缺失/过期时用于向 sso 换 ST。此前 recon 的“鉴权靠 u3t”表述已更正。
+
+### 2026-11-05 全量只读 smoke
+
+- 通过：courses / jobs / books / book_info / book_tree / custom_chapters / offline_books / book_plan /
+  job_info / job_status / task_linked / bucket_words / chapter_questions / paper_zip_info / paper_detail /
+  answer_detail v1+v2 / wrongnote 全部读接口 / finished_tasks。
+- `personalized_chapters`：4 本书全部 `-4 no_auth_zuul`；PC 的 `updatePersonalized()` 同样忽略非 0，
+  属账号/书籍权限，不是协议错误。
+- `test_all_data`：用 contentId/jobId/paperId 当 testId 均 `code=1 参数不合法`；需要真实在线测评 testId，
+  本次抽样作业未找到，未做成功路径验证。

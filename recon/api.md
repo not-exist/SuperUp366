@@ -555,6 +555,7 @@
 
 - **响应**：`data` 整体赋给 `this.personalized`，对外只暴露 getter `Personalized` @3615321；主进程**不解读任何字段**，原样落本地缓存后交给渲染层。
 - **备注**：无版本参数，每次调用都是全量。失败时 `updatePersonalized` 返回 `!1` 并沿用旧缓存。无 ut。
+- **2026-11-05 实测**：测试账号书架 4 本书全部返回 `code=-4,msg=no_auth_zuul`；`updatePersonalized()` 对非 0 直接返回 false，因此这是账号/书籍权限而非协议错误。路径与 `{bookId}` 参数正确。
 - **证据**：main/index.js@3567193、3558294、3622095、3615321
 
 #### POST /client/book/plan — 课程学习计划（章节开关）
@@ -699,6 +700,7 @@
 - **响应**：`data.testInfo.paperId`——**唯一被读取的字段**（@3752510），直接回写到 `e.paperId`，供下一步 `/client/paper/zipinfo` 使用。
 - **备注**：无 ut；`result.code!=0` 时弹窗"获取数据失败，请重试~"并中止整条下载链路。仅 `e.type==="homework"` 时调用，`textbook` 分支不走。
 - **证据**：main/index.js@3752236、3562001、3752510
+- **2026-11-05 实测**：用作业的 `contentId` / `jobId` / `paperId` 作为 `testId` 均返回 `code=1,msg=参数不合法`；该接口需要真实的在线测评 `testId`，测试账号抽样作业中未找到，未做线上成功验证。
 
 #### POST /client/paper/zipinfo — 试卷资源包信息
 
