@@ -383,7 +383,7 @@ python -m pytest -q     # 仓库根目录
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| `-21` / `-22`（没有登录 / ST 校验失败） | TGT 有效但该接口需一次性 ST | 已自动 `POST /v1/serviceTicket` 并 `?ticket=` 重放**一次**；仍失败抛 `Up366APIError`。确认 `tgt` 有效、`cookies` 完整 |
+| `-21` / `-22`（没有登录 / ST 校验失败） | 登录 Cookie 缺失/过期，或该接口要求一次性 ST | 已自动 `POST /v1/serviceTicket` 并 `?ticket=` 重放**一次**；仍失败抛 `Up366APIError`。先确认 `cookies`（`UP366-C`/`CASTGC`）完整，再确认 `tgt` 有效 |
 | 换 ST 失败 | 未返回 `code == -24` 或缺 `data.serverTicket` | 抛 `Up366APIError` / `Up366ResponseError`；多为 TGT 失效，需重新 `login()`（无自动重登） |
 | `-23`（没有 TGT） | `serviceTicket` 需要有效 `u3t` | 手工构造 `Up366` 时 `tgt` 为空触发；请通过 `login()` 创建或填入有效 TGT |
 | 一直被判未登录 | 丢了会话 Cookie | `UP366-C / CASTGC / SESSION` 须随每次请求携带；本库自动 `cookies.update`，手工构造会话要自己传入 |
