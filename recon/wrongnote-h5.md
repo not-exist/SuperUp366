@@ -253,7 +253,7 @@ python tools/grep_ctx.py extract/app/dist/main/main-window.js "registerStringPro
 
 ## 7. 实测状态
 
-- 2026-11-05 已用有效学生账号完成只读 e2e；上述 10 个读取路径全部 `code=0`，返回结构与本文章节一致。
+- 2026-11-05 已用有效学生账号完成只读 e2e；上述错题本读取路径全部 `code=0`，返回结构与本文章节一致。
 - 写接口 `question/submit` 只做 dry-run，**未真实提交**（会改动账号数据）；payload 六字段由 H5 源码确认。
 - 鉴权矩阵已确认：Cookie 或 `?ticket=` 任一即可，`u3t` 单独无效。
 - 分页已确认：body-only / query-only / 两者同时三者等价；H5 同时发，库也同时发。
