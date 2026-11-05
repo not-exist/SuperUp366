@@ -85,7 +85,7 @@ if pk is not None:
 
 ### 3.3 TGT / ST 自动换票
 
-鉴权靠 **TGT（`u3t` 头）+ 一次性 ST（`?ticket=` query）**，不是 JWT/Bearer。业务返回 `result.code in (-21, -22)` 时自动：① `POST sso /v1/serviceTicket`，form `{service:<失败请求完整 URL>}`；② 期望 `code == -24`，取 `data.serverTicket`；③ 把 `?ticket=<ST>`（已有 query 用 `&ticket=`）拼回原 URL **重放一次**（`retry_auth=False`）。SSO 下发 `UP366-C / CASTGC / SESSION` 等 Cookie，手工构造 `Up366(...)` 时必须带入。请求层统一做 `form_encode`，非 200 抛 `Up366HTTPError`，`code != 0` 抛 `Up366APIError`。
+业务 host 的主要凭证是**登录 Cookie**：`UP366-C`、`CASTGC`（`Domain=.up366.cn`）。2026-11-05 实测仅 Cookie 即可访问 `courses` / `jobs` / `job_info` / `books` / `finished_tasks` / `wrongnote`，而**仅 `u3t` 返回 `-21`**；`SESSION` 只作用于 `sso.up366.cn`，业务 host 收不到也不需要。`u3t` 仍由 PC 客户端随请求发送，并在 Cookie 缺失/过期、业务返回 `result.code in (-21, -22)` 时用来换一次性 ST。换票流程：① `POST sso /v1/serviceTicket`，form `{service:<失败请求完整 URL>}`；② 期望 `code == -24`，取 `data.serverTicket`；③ 把 `?ticket=<ST>`（已有 query 用 `&ticket=`）拼回原 URL **重放一次**（`retry_auth=False`）。手工构造 `Up366(...)` 时必须带入登录 Cookie（至少 `UP366-C` / `CASTGC`）。请求层统一做 `form_encode`，非 200 抛 `Up366HTTPError`，`code != 0` 抛 `Up366APIError`。
 
 ### 3.4 安全警告
 
