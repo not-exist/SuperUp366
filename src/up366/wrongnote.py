@@ -6,26 +6,29 @@ These endpoints live on ``https://wrongnote-api.up366.cn`` — a *different*
 host from the ordinary book APIs (``book-api`` / ``studytask-api``). They are
 not merged into those mixins on purpose. All ten endpoints are POST.
 
-Auth caveat (UNVERIFIED)
-------------------------
-The catalog was recovered from the H5 web SPA (``work/h5/js_chunk-*.js``),
-where these endpoints are called with cookie / service-ticket auth.
-``Up366._request`` instead sends the PC student-client ``u3t``/``u3r`` headers.
-Whether the wrongnote host accepts PC auth has NOT been confirmed with a live
-capture. This is documented here and deliberately NOT worked around in code;
-a real captured request is needed before trusting these against production.
+Auth
+----
+Live matrix (2026-11-05): a login Cookie alone returns code 0; a one-time ST
+``?ticket=`` alone also returns 0; ``u3t`` alone returns -21; no credentials
+returns -21. So this host accepts **either** the session cookies or the ST
+ticket, and does not use ``u3t`` by itself. The H5 client's axios wrapper
+sends ``-21/-22`` failures to ``data.serverTicketUrl`` and replays with
+``?ticket=``; inside the PC client Electron intercepts the SSO POST and
+answers it with the PC TGT. ``Up366._request`` already carries cookies, so
+the normal path works even before the ST retry.
 
-Writes
-------
-``kill_wrong_questions`` and ``submit_wrong_question`` are destructive and
-irreversible. They default to ``dry_run=True`` (zero network calls, returns a
-request preview) and require BOTH ``dry_run=False`` AND ``confirm=True`` to
-actually send. They never auto-retry.
+Reads vs writes
+---------------
+``wrong_kill_paper`` (``questions/kill``) is a READ: the kill page fetches the
+paper to render. ``submit_wrong_question`` (``question/submit``) is the only
+destructive call; it defaults to ``dry_run=True`` and requires BOTH
+``dry_run=False`` AND ``confirm=True`` to actually send. It never auto-retries.
 
-Experimental
-------------
-``wrong_killed_questions`` and ``wrong_question_show`` have unverified payload
-shapes; their ``**params`` are passed straight through as the request body.
+Payloads
+--------
+``wrong_killed_questions`` / ``wrong_question_show`` build the exact H5 field
+sets (including the pager query) and return ``WrongQuestion`` items. An empty
+``data={}`` means "no questions" and yields an empty page.
 """
 from __future__ import annotations
 
@@ -33,6 +36,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .endpoints import ENDPOINTS
+from .errors import Up366ResponseError
 
 __all__ = [
     "WrongSubject",
@@ -169,11 +173,13 @@ class WrongNotePage:
         page_size: Any,
         page_count: Any,
         raw: Mapping[str, Any] | None = None,
+        offset: Any = None,
     ):
         self.items = items
         self.current_page = current_page
         self.page_size = page_size
         self.page_count = page_count
+        self.offset = offset
         self.raw = dict(raw) if raw is not None else {}
 
     @classmethod
@@ -196,10 +202,13 @@ class WrongNotePage:
             pager.get("pageSize"),
             pager.get("pageCount"),
             raw=data,
+            offset=pager.get("offset"),
         )
 
     @property
     def has_next(self) -> bool:
+        if self.current_page is None or self.page_count is None:
+            return False
         return self.current_page < self.page_count
 
     def to_dict(self) -> dict[str, Any]:
@@ -241,29 +250,50 @@ class WrongCourse(_Raw):
 
 
 class WrongRank(_Raw):
-    """A rank row (loose wrapper; ``degree`` kept alongside the raw dict)."""
+    """A rank row. The H5 table renders ``realname``/``wrongCount``/
+    ``killedCount``/``recentKilledCount``; other fields stay in ``raw``."""
+
+    @property
+    def realname(self) -> Any:
+        return self.raw.get("realname")
 
     @property
     def wrong_count(self) -> Any:
         return self.raw.get("wrongCount")
 
     @property
-    def degree(self) -> Any:
-        return self.raw.get("degree")
+    def killed_count(self) -> Any:
+        return self.raw.get("killedCount")
+
+    @property
+    def recent_killed_count(self) -> Any:
+        return self.raw.get("recentKilledCount")
 
 
 class WrongNoteAPI:
     """Wrong-answer book endpoints. Mixed into :class:`up366.client.Up366`."""
+
+    @staticmethod
+    def _time_value(value: Any) -> Any:
+        """Match the H5 client: ``None`` becomes an empty form value."""
+        return "" if value is None else value
 
     def _wrongnote_page(
         self,
         payload: dict,
         item_type: type | None = None,
     ) -> WrongNotePage:
-        items, pager = self._page_data(payload)
-        return WrongNotePage.from_dict(
-            {"list": items, "pager": pager}, item_type=item_type
-        )
+        data = payload.get("data")
+        if not data:
+            # Empty dict / empty list / None all mean "no questions" in the
+            # H5 client; e.g. kill/question/show returns [] for today.
+            return WrongNotePage([], None, None, None, raw={})
+        if not isinstance(data, dict):
+            raise Up366ResponseError(
+                "wrongnote response did not contain a data object"
+            )
+        self._page_data(payload)  # validate data.list / data.pager
+        return WrongNotePage.from_dict(data, item_type=item_type)
 
     def _wrongnote_write(
         self,
@@ -299,7 +329,11 @@ class WrongNoteAPI:
         start_time: Any = None,
         end_time: Any = None,
     ) -> WrongSubjectStat:
-        """Return wrong/killed counters for one subject."""
+        """Return wrong/killed counters for one subject.
+
+        Time values match the H5 client's ``YYYY-MM-DD 00:00:00`` /
+        ``YYYY-MM-DD 23:59:59`` form; ``None`` is sent as an empty string.
+        """
         endpoint = ENDPOINTS["wrong_subject_stat"]
         payload = self._request(
             endpoint.method,
@@ -308,14 +342,20 @@ class WrongNoteAPI:
                 "bookId": book_id,
                 "stageId": stage_id,
                 "subjectId": subject_id,
-                "startTime": start_time,
-                "endTime": end_time,
+                "startTime": self._time_value(start_time),
+                "endTime": self._time_value(end_time),
             },
         )
         return WrongSubjectStat.from_dict(self._dict_data(payload))
 
     def wrong_books(self, *, stage_id: Any, subject_id: Any) -> list[WrongBook]:
-        """Return books with client-side ``全部``/``练习`` sentinels added."""
+        """Return the server's books plus the H5 UI's two sentinel entries.
+
+        The server only returns real books; the H5 page prepends
+        ``{bookId:"0", bookName:"全部"}`` and appends
+        ``{bookId:"WORK", bookName:"练习"}``. This library mirrors that
+        convenience so callers see the same list as the UI.
+        """
         endpoint = ENDPOINTS["wrong_books"]
         payload = self._request(
             endpoint.method,
@@ -343,7 +383,13 @@ class WrongNoteAPI:
         page: int = 1,
         page_size: int = 100,
     ) -> WrongNotePage:
-        """Return a page of knowledge-point rows (page of ``WrongKnowledge``)."""
+        """Return a page of knowledge-point rows (page of ``WrongKnowledge``).
+
+        ``order_field`` is one of the H5 table columns:
+        ``qTypeName`` / ``knowledgeName`` / ``wrongTimes`` / ``wrongCount``.
+        The H5 client sends the pager in both the form body and the query;
+        this method does the same.
+        """
         endpoint = ENDPOINTS["wrong_knowledge"]
         payload = self._request(
             endpoint.method,
@@ -352,12 +398,16 @@ class WrongNoteAPI:
                 "bookId": book_id,
                 "stageId": stage_id,
                 "subjectId": subject_id,
-                "startTime": start_time,
-                "endTime": end_time,
+                "startTime": self._time_value(start_time),
+                "endTime": self._time_value(end_time),
                 "orderType": order_type,
                 "orderField": order_field,
                 "pager###pageSize": page_size,
                 "pager###currentPage": page,
+            },
+            params={
+                "pager.currentPage": page,
+                "pager.pageSize": page_size,
             },
         )
         return self._wrongnote_page(payload, WrongKnowledge)
@@ -381,7 +431,12 @@ class WrongNoteAPI:
         page: int = 1,
         page_size: int = 100,
     ) -> WrongNotePage:
-        """Return a rank page (page of ``WrongRank``)."""
+        """Return a rank page (page of ``WrongRank``).
+
+        ``order_field`` is one of ``wrongCount`` / ``killedCount`` /
+        ``recentKilledCount``. The H5 client sends the pager in both the form
+        body and the query; this method does the same.
+        """
         endpoint = ENDPOINTS["wrong_rank"]
         payload = self._request(
             endpoint.method,
@@ -393,50 +448,124 @@ class WrongNoteAPI:
                 "pager###pageSize": page_size,
                 "pager###currentPage": page,
             },
+            params={
+                "pager.currentPage": page,
+                "pager.pageSize": page_size,
+            },
         )
         return self._wrongnote_page(payload, WrongRank)
 
-    def wrong_killed_questions(self, **params: Any) -> WrongNotePage:
-        """EXPERIMENTAL: payload shape unverified; ``params`` passed through.
+    def wrong_killed_questions(
+        self,
+        *,
+        book_id: Any,
+        uid: Any,
+        stage_id: Any,
+        subject_id: Any,
+        kill_flag: Any,
+        start_time: Any = None,
+        end_time: Any = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> WrongNotePage:
+        """Return the killed-question paper (H5 ``kill/question/show``).
 
-        Recovered from the H5 SPA but not yet confirmed against a live capture.
-        Returns a page of raw dicts.
+        ``kill_flag`` is 0 for the all-time list (the H5 client adds the date
+        range only then) and 1 for today. Items are ``WrongQuestion`` rows.
         """
         endpoint = ENDPOINTS["wrong_killed_questions"]
+        data: dict[str, Any] = {
+            "bookId": book_id,
+            "uid": uid,
+            "stageId": stage_id,
+            "subjectId": subject_id,
+            "killFlag": kill_flag,
+            "pager###pageSize": page_size,
+            "pager###currentPage": page,
+        }
+        if str(kill_flag) == "0":
+            data["startTime"] = self._time_value(start_time)
+            data["endTime"] = self._time_value(end_time)
         payload = self._request(
             endpoint.method,
             endpoint.base_url + endpoint.path,
-            data=dict(params),
+            data=data,
+            params={
+                "pager.currentPage": page,
+                "pager.pageSize": page_size,
+            },
         )
-        return self._wrongnote_page(payload)
+        return self._wrongnote_page(payload, WrongQuestion)
 
-    def wrong_question_show(self, **params: Any) -> WrongNotePage:
-        """EXPERIMENTAL: payload shape unverified; ``params`` passed through.
+    def wrong_question_show(
+        self,
+        *,
+        stage_id: Any,
+        subject_id: Any,
+        book_id: Any,
+        qtype_id: Any,
+        knowledge_id: Any,
+        start_time: Any = None,
+        end_time: Any = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> WrongNotePage:
+        """Return the remaining-question paper for one knowledge point.
 
-        Recovered from the H5 SPA but not yet confirmed against a live capture.
-        Returns a page of raw dicts.
+        H5 ``student/question/show``; items are ``WrongQuestion`` rows.
         """
         endpoint = ENDPOINTS["wrong_question_show"]
         payload = self._request(
             endpoint.method,
             endpoint.base_url + endpoint.path,
-            data=dict(params),
+            data={
+                "stageId": stage_id,
+                "subjectId": subject_id,
+                "bookId": book_id,
+                "qtypeId": qtype_id,
+                "knowledgeId": knowledge_id,
+                "startTime": self._time_value(start_time),
+                "endTime": self._time_value(end_time),
+                "pager###pageSize": page_size,
+                "pager###currentPage": page,
+            },
+            params={
+                "pager.currentPage": page,
+                "pager.pageSize": page_size,
+            },
         )
-        return self._wrongnote_page(payload)
+        return self._wrongnote_page(payload, WrongQuestion)
+
+    def wrong_kill_paper(
+        self,
+        *,
+        book_id: Any,
+        stage_id: Any,
+        subject_id: Any,
+        start_time: Any = None,
+        end_time: Any = None,
+    ) -> dict:
+        """Return the paper a student must answer to kill wrong questions.
+
+        H5 endpoint ``/client/wrongnote/student/questions/kill`` is a READ:
+        the kill page fetches ``pathPrefix/paperData/answerData`` and renders
+        it, then submits answers through :meth:`submit_wrong_question`.
+        """
+        endpoint = ENDPOINTS["wrong_kill_paper"]
+        payload = self._request(
+            endpoint.method,
+            endpoint.base_url + endpoint.path,
+            data={
+                "bookId": book_id,
+                "stageId": stage_id,
+                "subjectId": subject_id,
+                "startTime": self._time_value(start_time),
+                "endTime": self._time_value(end_time),
+            },
+        )
+        return self._dict_data(payload)
 
     # --- writes (destructive, strictly gated) ----------------------------
-
-    def kill_wrong_questions(
-        self,
-        payload: Mapping[str, Any],
-        *,
-        dry_run: bool = True,
-        confirm: bool = False,
-    ) -> dict:
-        """Mark wrong questions as killed (destructive, default dry-run)."""
-        return self._wrongnote_write(
-            "kill_wrong_questions", payload, dry_run=dry_run, confirm=confirm
-        )
 
     def submit_wrong_question(
         self,
@@ -445,7 +574,18 @@ class WrongNoteAPI:
         dry_run: bool = True,
         confirm: bool = False,
     ) -> dict:
-        """Submit a wrong question (destructive, default dry-run)."""
+        """Submit killed-question answers (destructive, default dry-run).
+
+        Payload (from the H5 ``question/submit`` call):
+
+        ``uid``          student uid as a string
+        ``result``       JSON string ``{"answerdata": <xml>,
+                                          "mark_datao": "<elements>...</elements>"}``
+        ``startTime``    epoch milliseconds as a string (server time at open)
+        ``endTime``      epoch milliseconds as a string (server time at submit)
+        ``seconds``      ``ceil((endTime-startTime)/1000)``
+        ``rightQstIds``  comma-separated ids, or ``""``
+        """
         return self._wrongnote_write(
             "submit_wrong_question", payload, dry_run=dry_run, confirm=confirm
         )

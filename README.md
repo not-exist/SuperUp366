@@ -33,7 +33,7 @@ for job in user.jobs(9224394):
 | 文件 | 内容 |
 |---|---|
 | `client.py` | `login` / `Up366` / 会话 |
-| `endpoints.py` | 端点目录（31 条） |
+| `endpoints.py` | 端点目录（32 条） |
 | `book.py` / `job_api.py` / `wrongnote.py` | 教材 / 普通作业 / 错题本 mixin |
 | `job.py` | `Job` / `JobStatus` 模型 |
 | `form.py` / `words.py` | `form_encode` / 单词 PK 报文构造 |

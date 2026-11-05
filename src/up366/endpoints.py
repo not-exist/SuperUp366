@@ -88,13 +88,18 @@ ENDPOINTS = {
         name="finished_tasks",
         base_url="https://dsb-api.up366.cn",
         path="/client/book/finished-task/list",
-        fallback="GET",
     ),
     "answer_detail": Endpoint(
         name="answer_detail",
         base_url="https://dsb-api.up366.cn",
         path="/client/student/task/answer/detail/v2",
-        fallback="GET",
+    ),
+    "answer_detail_v1": Endpoint(
+        name="answer_detail_v1",
+        base_url="https://dsb-api.up366.cn",
+        path="/client/student/task/answer/detail",
+        method="GET",
+        body="query",
     ),
     "test_all_data": Endpoint(
         name="test_all_data",
@@ -176,11 +181,10 @@ ENDPOINTS = {
         base_url="https://wrongnote-api.up366.cn",
         path="/client/wrongnote/student/question/show",
     ),
-    "kill_wrong_questions": Endpoint(
-        name="kill_wrong_questions",
+    "wrong_kill_paper": Endpoint(
+        name="wrong_kill_paper",
         base_url="https://wrongnote-api.up366.cn",
         path="/client/wrongnote/student/questions/kill",
-        write=True,
     ),
     "submit_wrong_question": Endpoint(
         name="submit_wrong_question",

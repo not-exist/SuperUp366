@@ -45,26 +45,47 @@ def _normalize_row(row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 class JobAPIMixin:
-    def finished_tasks(self, book_id, course_id=None) -> list[dict]:
+    def finished_tasks(self, book_id) -> list[dict]:
+        """Return finished-task scores for one book.
+
+        Both official clients send only ``bookId``: the PC client uses GET,
+        the H5 client uses POST. The server routes both methods; this library
+        follows the H5 POST.
+        """
         endpoint = ENDPOINTS["finished_tasks"]
-        data: dict[str, Any] = {"bookId": book_id}
-        if course_id is not None:
-            data["courseId"] = course_id
         payload = self._request(
-            endpoint.method, endpoint.base_url + endpoint.path, data=data
+            endpoint.method,
+            endpoint.base_url + endpoint.path,
+            data={"bookId": book_id},
         )
         if payload.get("data") is None:
             return []
         return self._array_data(payload)
 
     def answer_detail(self, params: Mapping, *, use_v2: bool = True) -> dict:
-        endpoint = ENDPOINTS["answer_detail"]
-        url = endpoint.base_url + endpoint.path
+        """Return a task's paper/answer/student-answer XML.
+
+        Both variants take the same four fields:
+        ``courseId, uid, bookId, taskId`` (the H5 mock-exam route inherits
+        ``courseId`` from its parent route; omitting it makes v2 fail with
+        ``param_missing``). ``use_v2=True`` sends POST
+        ``/client/student/task/answer/detail/v2``; ``use_v2=False`` sends GET
+        ``/client/student/task/answer/detail`` with query parameters.
+        Both return ``data.paperInfo`` plus ``data.userAnswer``.
+        """
         if use_v2:
-            payload = self._request(endpoint.method, url, data=dict(params))
-        else:
+            endpoint = ENDPOINTS["answer_detail"]
             payload = self._request(
-                endpoint.fallback or "GET", url, params=dict(params)
+                endpoint.method,
+                endpoint.base_url + endpoint.path,
+                data=dict(params),
+            )
+        else:
+            endpoint = ENDPOINTS["answer_detail_v1"]
+            payload = self._request(
+                endpoint.method,
+                endpoint.base_url + endpoint.path,
+                params=dict(params),
             )
         return self._dict_data(payload)
 

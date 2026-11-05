@@ -12,6 +12,7 @@ from up366.job import Job, JobStatus
 
 FINISHED_TASKS_URL = "https://dsb-api.up366.cn/client/book/finished-task/list"
 ANSWER_DETAIL_URL = "https://dsb-api.up366.cn/client/student/task/answer/detail/v2"
+ANSWER_DETAIL_V1_URL = "https://dsb-api.up366.cn/client/student/task/answer/detail"
 TEST_ALL_DATA_URL = "https://xot-api.up366.cn/client/onlinetesting/alldata"
 PAPER_ZIP_INFO_URL = "https://xot-api.up366.cn/client/paper/zipinfo"
 PAPER_DETAIL_URL = "https://qlib-api.up366.cn/client/paper/detail"
@@ -78,19 +79,13 @@ def _job() -> Job:
 
 # --- read endpoints: exact method / url / data -----------------------------
 
-def test_finished_tasks_posts_book_and_course_and_returns_array(monkeypatch):
+def test_finished_tasks_posts_book_only_and_returns_array(monkeypatch):
     rows = [{"taskId": "T-1", "score": 8}]
     captured = _capture(monkeypatch, _ok(rows))
-    result = _session().finished_tasks("BOOK-1", 9222783)
+    result = _session().finished_tasks("BOOK-1")
     assert result == rows
     assert captured["method"] == "POST"
     assert captured["url"] == FINISHED_TASKS_URL
-    assert captured["data"] == {"bookId": "BOOK-1", "courseId": "9222783"}
-
-
-def test_finished_tasks_omits_course_id_when_not_given(monkeypatch):
-    captured = _capture(monkeypatch, _ok([]))
-    assert _session().finished_tasks("BOOK-1") == []
     assert captured["data"] == {"bookId": "BOOK-1"}
 
 
@@ -109,11 +104,33 @@ def test_answer_detail_posts_params_as_data(monkeypatch):
     assert captured["data"] == {"taskId": "T-1", "uid": "39370562"}
 
 
-def test_answer_detail_use_v2_false_uses_get_fallback(monkeypatch):
+def test_answer_detail_v2_passes_course_id(monkeypatch):
+    captured = _capture(monkeypatch, _ok({"paperInfo": {}, "userAnswer": {}}))
+    result = _session().answer_detail(
+        {"courseId": "C-1", "uid": 1, "bookId": "B-1", "taskId": "T-1"}
+    )
+    assert result == {"paperInfo": {}, "userAnswer": {}}
+    assert captured["method"] == "POST"
+    assert captured["url"] == ANSWER_DETAIL_URL
+    assert captured["data"] == {
+        "courseId": "C-1",
+        "uid": "1",
+        "bookId": "B-1",
+        "taskId": "T-1",
+    }
+
+
+def test_answer_detail_use_v2_false_uses_non_v2_get(monkeypatch):
     captured = _capture(monkeypatch, _ok({"ok": True}))
-    _session().answer_detail({"taskId": "T-1"}, use_v2=False)
+    _session().answer_detail(
+        {"courseId": "C-1", "bookId": "B-1", "taskId": "T-1", "uid": 1},
+        use_v2=False,
+    )
     assert captured["method"] == "GET"
-    assert captured["url"] == ANSWER_DETAIL_URL + "?taskId=T-1"
+    assert captured["url"] == (
+        ANSWER_DETAIL_V1_URL
+        + "?courseId=C-1&bookId=B-1&taskId=T-1&uid=1"
+    )
     assert captured["data"] is None
 
 

@@ -10,6 +10,7 @@ from up366.wrongnote import (
     WrongCourse,
     WrongKnowledge,
     WrongNotePage,
+    WrongQuestion,
     WrongRank,
     WrongSubject,
     WrongSubjectStat,
@@ -25,7 +26,7 @@ URLS = {
     "wrong_rank": BASE + "/client/wrongnote/v2/rank/list",
     "wrong_killed_questions": BASE + "/client/wrongnote/kill/question/show",
     "wrong_question_show": BASE + "/client/wrongnote/student/question/show",
-    "kill_wrong_questions": BASE + "/client/wrongnote/student/questions/kill",
+    "wrong_kill_paper": BASE + "/client/wrongnote/student/questions/kill",
     "submit_wrong_question": BASE + "/client/wrongnote/student/question/submit",
 }
 
@@ -178,7 +179,9 @@ def test_wrong_knowledge_returns_typed_page(monkeypatch):
     )
 
     assert captured["method"] == "POST"
-    assert captured["url"] == URLS["wrong_knowledge"]
+    assert captured["url"] == (
+        URLS["wrong_knowledge"] + "?pager.currentPage=1&pager.pageSize=100"
+    )
     assert captured["data"] == {
         "bookId": "0",
         "stageId": "3",
@@ -226,14 +229,23 @@ def test_wrong_courses_returns_models(monkeypatch):
 
 def test_wrong_rank_returns_typed_page_and_no_next(monkeypatch):
     captured = {}
-    rows = [{"wrongCount": 7, "degree": 2, "realname": "张三"}]
+    rows = [
+        {
+            "wrongCount": 7,
+            "killedCount": 3,
+            "recentKilledCount": 1,
+            "realname": "张三",
+        }
+    ]
     data = {"list": rows, "pager": {"currentPage": 2, "pageSize": 100, "pageCount": 2}}
     _install(monkeypatch, _ok(data), captured=captured)
 
     result = _session().wrong_rank(course_id=922)
 
     assert captured["method"] == "POST"
-    assert captured["url"] == URLS["wrong_rank"]
+    assert captured["url"] == (
+        URLS["wrong_rank"] + "?pager.currentPage=1&pager.pageSize=100"
+    )
     assert captured["data"] == {
         "courseId": "922",
         "orderType": "desc",
@@ -247,38 +259,110 @@ def test_wrong_rank_returns_typed_page_and_no_next(monkeypatch):
     rank = result.items[0]
     assert isinstance(rank, WrongRank)
     assert rank.wrong_count == 7
-    assert rank.degree == 2
-    assert rank.raw["realname"] == "张三"
+    assert rank.killed_count == 3
+    assert rank.recent_killed_count == 1
+    assert rank.realname == "张三"
 
 
-def test_wrong_killed_questions_passes_params_through(monkeypatch):
+def test_wrong_killed_questions_builds_expected_request(monkeypatch):
     captured = {}
     rows = [{"questionId": "Q1"}]
-    data = {"list": rows, "pager": {"currentPage": 1, "pageSize": 20, "pageCount": 1}}
+    data = {"list": rows, "pager": {"currentPage": 1, "pageSize": 10, "pageCount": 1}}
     _install(monkeypatch, _ok(data), captured=captured)
 
-    result = _session().wrong_killed_questions(stageId=3, subjectId=2)
+    result = _session().wrong_killed_questions(
+        book_id="1",
+        uid=42,
+        stage_id=3,
+        subject_id=2,
+        kill_flag=0,
+        start_time="2026-01-01",
+        end_time="2026-01-31",
+    )
 
     assert captured["method"] == "POST"
-    assert captured["url"] == URLS["wrong_killed_questions"]
-    assert captured["data"] == {"stageId": "3", "subjectId": "2"}
+    assert captured["url"] == (
+        URLS["wrong_killed_questions"] + "?pager.currentPage=1&pager.pageSize=10"
+    )
+    assert captured["data"] == {
+        "bookId": "1",
+        "uid": "42",
+        "stageId": "3",
+        "subjectId": "2",
+        "killFlag": "0",
+        "pager.pageSize": "10",
+        "pager.currentPage": "1",
+        "startTime": "2026-01-01",
+        "endTime": "2026-01-31",
+    }
     assert isinstance(result, WrongNotePage)
-    assert result.items == rows  # experimental: raw dicts, no conversion
+    assert isinstance(result.items[0], WrongQuestion)
     assert result.has_next is False
 
 
-def test_wrong_question_show_passes_params_through(monkeypatch):
+def test_wrong_killed_questions_today_omits_time_range(monkeypatch):
+    captured = {}
+    _install(monkeypatch, _ok({"list": [], "pager": {}}), captured=captured)
+
+    _session().wrong_killed_questions(
+        book_id="1", uid=42, stage_id=3, subject_id=2, kill_flag=1
+    )
+
+    assert "startTime" not in captured["data"]
+    assert "endTime" not in captured["data"]
+
+
+def test_wrong_show_empty_data_returns_empty_page(monkeypatch):
+    for empty in ({}, []):
+        _install(monkeypatch, _ok(empty))
+
+        result = _session().wrong_killed_questions(
+            book_id="1", uid=42, stage_id=3, subject_id=2, kill_flag=1
+        )
+
+        assert result.items == []
+        assert result.has_next is False
+
+
+def test_wrong_question_show_builds_expected_request(monkeypatch):
     captured = {}
     rows = [{"questionId": "Q2", "questionText": "题干"}]
-    data = {"list": rows, "pager": {"currentPage": 1, "pageSize": 20, "pageCount": 1}}
+    data = {
+        "list": rows,
+        "pager": {"currentPage": 1, "pageSize": 10, "pageCount": 1},
+        "paperData": "<paper/>",
+        "pathPrefix": "cdn/",
+    }
     _install(monkeypatch, _ok(data), captured=captured)
 
-    result = _session().wrong_question_show(bookId="1", stageId=3)
+    result = _session().wrong_question_show(
+        stage_id=3,
+        subject_id=2,
+        book_id="1",
+        qtype_id=5,
+        knowledge_id="K1",
+        start_time="2026-01-01",
+        end_time="2026-01-31",
+    )
 
     assert captured["method"] == "POST"
-    assert captured["url"] == URLS["wrong_question_show"]
-    assert captured["data"] == {"bookId": "1", "stageId": "3"}
-    assert result.items == rows
+    assert captured["url"] == (
+        URLS["wrong_question_show"] + "?pager.currentPage=1&pager.pageSize=10"
+    )
+    assert captured["data"] == {
+        "stageId": "3",
+        "subjectId": "2",
+        "bookId": "1",
+        "qtypeId": "5",
+        "knowledgeId": "K1",
+        "startTime": "2026-01-01",
+        "endTime": "2026-01-31",
+        "pager.pageSize": "10",
+        "pager.currentPage": "1",
+    }
+    assert isinstance(result.items[0], WrongQuestion)
+    assert result.raw["paperData"] == "<paper/>"
+    assert result.raw["pathPrefix"] == "cdn/"
 
 
 # --- malformed responses -------------------------------------------------
@@ -302,75 +386,60 @@ def test_array_endpoint_rejects_dict_data(monkeypatch):
         _session().wrong_subjects()
 
 
-# --- writes (strict dry_run, never real) ---------------------------------
+# --- reads: kill paper ----------------------------------------------------
 
 
-def test_kill_wrong_questions_dry_run_default_no_network(monkeypatch):
-    calls = []
-    _install(monkeypatch, _ok({}), calls=calls)
-    payload = {"questionIds": ["Q1", "Q2"], "bookId": "1"}
-
-    result = _session().kill_wrong_questions(payload)
-
-    assert calls == []  # ZERO httpx.request calls
-    assert result == {
-        "endpoint": "kill_wrong_questions",
-        "url": URLS["kill_wrong_questions"],
-        "data": {"questionIds": ["Q1", "Q2"], "bookId": "1"},
-    }
-    assert result["data"] is not payload  # preview holds a copy
-
-
-def test_kill_wrong_questions_dry_run_wins_over_confirm(monkeypatch):
-    calls = []
-    _install(monkeypatch, _ok({}), calls=calls)
-
-    result = _session().kill_wrong_questions(
-        {"id": 1}, dry_run=True, confirm=True
-    )
-
-    assert calls == []
-    assert result["endpoint"] == "kill_wrong_questions"
-
-
-def test_kill_wrong_questions_confirm_false_no_network(monkeypatch):
-    calls = []
-    _install(monkeypatch, _ok({}), calls=calls)
-
-    result = _session().kill_wrong_questions(
-        {"id": 1}, dry_run=False, confirm=False
-    )
-
-    assert calls == []
-    assert result["endpoint"] == "kill_wrong_questions"
-
-
-def test_kill_wrong_questions_confirm_true_sends(monkeypatch):
+def test_wrong_kill_paper_sends_expected_request(monkeypatch):
     captured = {}
-    response_payload = _ok({"killed": 2})
-    _install(monkeypatch, response_payload, captured=captured)
+    paper = {
+        "pathPrefix": "https://cdn/",
+        "paperData": "<paper/>",
+        "answerData": "<answer/>",
+    }
+    _install(monkeypatch, _ok(paper), captured=captured)
 
-    result = _session().kill_wrong_questions(
-        {"questionIds": ["Q1"], "flag": 1}, dry_run=False, confirm=True
+    result = _session().wrong_kill_paper(
+        book_id="1",
+        stage_id=3,
+        subject_id=2,
+        start_time="2026-01-01",
+        end_time="2026-01-31",
     )
 
+    assert result == paper
     assert captured["method"] == "POST"
-    assert captured["url"] == URLS["kill_wrong_questions"]
-    assert captured["data"] == {"questionIds": '["Q1"]', "flag": "1"}
-    assert result == response_payload
+    assert captured["url"] == URLS["wrong_kill_paper"]
+    assert captured["data"] == {
+        "bookId": "1",
+        "stageId": "3",
+        "subjectId": "2",
+        "startTime": "2026-01-01",
+        "endTime": "2026-01-31",
+    }
+
+
+def test_wrong_kill_paper_empty_data_returns_empty_dict(monkeypatch):
+    _install(monkeypatch, _ok({}))
+
+    result = _session().wrong_kill_paper(book_id="1", stage_id=3, subject_id=2)
+
+    assert result == {}
+
+
+# --- writes (strict dry_run, never real) ---------------------------------
 
 
 def test_submit_wrong_question_dry_run_default_no_network(monkeypatch):
     calls = []
     _install(monkeypatch, _ok({}), calls=calls)
 
-    result = _session().submit_wrong_question({"questionId": "Q1"})
+    result = _session().submit_wrong_question({"uid": "1", "result": "{}"})
 
     assert calls == []
     assert result == {
         "endpoint": "submit_wrong_question",
         "url": URLS["submit_wrong_question"],
-        "data": {"questionId": "Q1"},
+        "data": {"uid": "1", "result": "{}"},
     }
 
 
@@ -380,12 +449,12 @@ def test_submit_wrong_question_confirm_true_sends(monkeypatch):
     _install(monkeypatch, response_payload, captured=captured)
 
     result = _session().submit_wrong_question(
-        {"questionId": "Q1", "courseId": 922}, dry_run=False, confirm=True
+        {"uid": "1", "result": "{}"}, dry_run=False, confirm=True
     )
 
     assert captured["method"] == "POST"
     assert captured["url"] == URLS["submit_wrong_question"]
-    assert captured["data"] == {"questionId": "Q1", "courseId": "922"}
+    assert captured["data"] == {"uid": "1", "result": "{}"}
     assert result == response_payload
 
 
@@ -393,7 +462,7 @@ def test_write_rejects_empty_payload(monkeypatch):
     calls = []
     _install(monkeypatch, _ok({}), calls=calls)
     with pytest.raises(ValueError):
-        _session().kill_wrong_questions({}, dry_run=False, confirm=True)
+        _session().submit_wrong_question({}, dry_run=False, confirm=True)
     assert calls == []
 
 
