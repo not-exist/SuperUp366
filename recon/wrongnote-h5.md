@@ -92,6 +92,8 @@ curl -sS -X POST 'https://sso.up366.cn/v1/serviceTicket' \
 
 结论：**Cookie 与 `?ticket=` 各自都足以鉴权，`u3t` 单独无效**。pyapi 登录后持有 Cookie，并保留 `-21/-22 → ST → ?ticket=` 重试，两条路都可用。
 
+登录响应实际下发 3 个 Cookie：`UP366-C`、`CASTGC`（`Domain=.up366.cn`）与 `SESSION`（`Domain=sso.up366.cn`）。wrongnote-api 只能收到前两个；实测仅 Cookie 即可，说明 `UP366-C`/`CASTGC` 已足够。
+
 ## 2. 端点全表（H5 6.12.1）
 
 H5 源码中的模块 `61f5`（每个入口 bundle 都内联一份，函数体一致）：
