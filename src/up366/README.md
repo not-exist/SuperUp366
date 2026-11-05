@@ -180,14 +180,14 @@ submit_word_pk(job: Job, score: int,
 只读查询；参数 / 返回见第 6 节 `book-api` / `studytask-api`，字段级见 `recon/api.md §1.4 / §1.12`。
 
 - `books()` 我的书架（PC 翻书 V11）→ `list[Book]`；`book_info(book_id, *, original_book_id="")` 单本详情 → `Book`（含 `packType`）。
-- `book_tree(book_id, *, version="")` 整棵目录树（章 / 页 / 任务），`version=""` 取最新；`custom_chapters(book_id, course_id)` 自定义章节（`customFlag==1` 时才有意义）；`personalized_chapters(book_id)` 个性化章节。
+- `book_tree(book_id, *, version="")` 整棵目录树（章 / 页 / 任务），`version=""` 取最新；`custom_chapters(book_id, course_id)` 自定义章节（`customFlag==1` 时才有意义）；`personalized_chapters(book_id)` 个性化章节（实测测试账号 4 本书均 `-4 no_auth_zuul`；PC 的 `updatePersonalized()` 同样忽略非 0，属账号/书籍权限而非协议错误）。
 - `offline_books()` 可离线下载教材 ID 白名单 → `list[str]`；`book_plan(course_id, book_id, *, book_type=1)` 课程学习计划（章节开关）→ `list[dict]`（`course_id` 为 `None` / `<=0` 时不发请求，直接返回 `[]`）。
 
 ### 4.5 本批新增 · 普通作业 API（`JobAPIMixin`）
 
 只读查询 + 两类写接口（写接口默认 dry-run，见第 8 节）。
 
-- 只读：`finished_tasks(book_id)` 已完成任务分数（只传 `bookId`；H5 用 POST、PC 用 GET，网关两条路由都接受，本库走 POST）；`answer_detail(params, *, use_v2=True)` 作答详情（两版参数相同：`{courseId,uid,bookId,taskId}`；`use_v2=True` → POST `/v2`，`use_v2=False` → GET 非 v2；响应均为 `data.paperInfo` + `data.userAnswer`）；`test_all_data(test_id, uid)` 测评全量数据（读 `data.testInfo.paperId`）；`paper_zip_info(paper_id)` 试卷包地址 / 版本；`paper_detail(paper_id)` 返回 **`data.paperData` 的 XML 字符串**（非 dict）；`chapter_questions(book_id, chapter_id, file_id)` 章节题目；`task_linked(book_id, task_id, *, type=1)` 任务关联目录；`job_status(course_id, job_id, content_id, book_id)` → `JobStatus`（复用 `job_info` 端点、**不新增端点行**，把 `data` 交给 `JobStatus.from_dict()`，返回模型而非原始 dict；请求体与 `job_info` 完全相同，`studyTaskId` 恒等于 `job_id`）。
+- 只读：`finished_tasks(book_id)` 已完成任务分数（只传 `bookId`；H5 用 POST、PC 用 GET，网关两条路由都接受，本库走 POST）；`answer_detail(params, *, use_v2=True)` 作答详情（两版参数相同：`{courseId,uid,bookId,taskId}`；`use_v2=True` → POST `/v2`，`use_v2=False` → GET 非 v2；响应均为 `data.paperInfo` + `data.userAnswer`）；`test_all_data(test_id, uid)` 测评全量数据（读 `data.testInfo.paperId`；需要真实的在线测评 `testId`，本次抽样作业未找到成功路径）；`paper_zip_info(paper_id)` 试卷包地址 / 版本；`paper_detail(paper_id)` 返回 **`data.paperData` 的 XML 字符串**（非 dict）；`chapter_questions(book_id, chapter_id, file_id)` 章节题目；`task_linked(book_id, task_id, *, type=1)` 任务关联目录；`job_status(course_id, job_id, content_id, book_id)` → `JobStatus`（复用 `job_info` 端点、**不新增端点行**，把 `data` 交给 `JobStatus.from_dict()`，返回模型而非原始 dict；请求体与 `job_info` 完全相同，`studyTaskId` 恒等于 `job_id`）。
 - 写：`submit_task_score(job, row, *, submit_type="0", dry_run=True, confirm=False, verify=True)`（`verify=True` 提交成功后回读 `job_status()` 校验，不自动重提）；`submit_online_test(row, *, dry_run=True, confirm=False)`。
 
 ### 4.6 本批新增 · 错题本 API（`WrongNoteAPI`）
@@ -261,14 +261,14 @@ from up366.wrongnote import (WrongSubject, WrongSubjectStat, WrongBook, WrongKno
 | book-api | POST | `/client/v2/book/info` | `{bookId, bookType:1, originalBookId}` | `data` 对象 | `book_info()` |
 | book-api | POST | `/client/books/tree` | `{bookId, version, bookType:1}` | `data` 目录树（`version`/`chapters`/`pages`/`tasks`） | `book_tree()` |
 | book-api | POST | `/client/custom/book/chapters` | `{bookId, courseId}` | `data` | `custom_chapters()` |
-| book-api | POST | `/client/chapters/personalized/list` | `{bookId}` | `data` | `personalized_chapters()` |
+| book-api | POST | `/client/chapters/personalized/list` | `{bookId}` | `data` | `personalized_chapters()`；`-4 no_auth_zuul` = 无个性化目录权限 |
 | book-api | POST | `/front/offline/download/books` | 空 body（`body=none`） | `data.bookIds` | `offline_books()` |
 | book-api | POST | `/client/chapters/list-question-file` | `{bookId, chapterId, fileId}` | `data.dirQuestions` | `chapter_questions()` |
 | book-api | POST | `/client/task/linked` | `{bookId, taskId, type:1}` | `data.chapters` | `task_linked()` |
 | dsb-api | POST（H5）/ GET（PC） | `/client/book/finished-task/list` | `{bookId}` | `data` 数组（`[].taskId` 为键） | `finished_tasks()`；两端都只传 `bookId`，本库走 POST |
 | dsb-api | POST | `/client/student/task/answer/detail/v2` | `{courseId,uid,bookId,taskId}` | `data.paperInfo` + `data.userAnswer` | `answer_detail(use_v2=True)`；H5 变体（`courseId` 来自父路由，缺省报 `param_missing`） |
 | dsb-api | GET | `/client/student/task/answer/detail` | `{courseId,bookId,taskId,uid}` | 同上 | `answer_detail(use_v2=False)`；PC 变体 |
-| xot-api | POST | `/client/onlinetesting/alldata` | `{testId, uid}` | `data.testInfo.paperId` | `test_all_data()` |
+| xot-api | POST | `/client/onlinetesting/alldata` | `{testId, uid}` | `data.testInfo.paperId` | `test_all_data()`；`testId` 必须是真实在线测评 id |
 | xot-api | POST | `/client/paper/zipinfo` | `{paperId}` | `data.downloadurl` / `data.fileId` | `paper_zip_info()` |
 | xot-api | POST | `/client/onlinetesting/submit` | 整行成绩 + `testId` | `result.code` | `submit_online_test()`（write） |
 | qlib-api | GET | `/client/paper/detail` | query `{paperId}` | `data.paperData`（XML 字符串） | `paper_detail()` |
