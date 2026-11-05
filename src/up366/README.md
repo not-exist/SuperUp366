@@ -196,7 +196,7 @@ submit_word_pk(job: Job, score: int,
 
 - `wrong_subjects()` → `list[WrongSubject]`；`wrong_subject_stat(*, book_id="0", stage_id, subject_id, start_time=None, end_time=None)` → `WrongSubjectStat`；`wrong_books(*, stage_id, subject_id)` → `list[WrongBook]`；`wrong_courses(*, stage_id, subject_id)` → `list[WrongCourse]`。
 - 分页：`wrong_knowledge(...)`（`order_field` 默认 `wrongTimes`）、`wrong_rank(*, course_id, ...)`（`order_field` 默认 `wrongCount`）→ `WrongNotePage`；两者都把 pager 同时放进 form body 与 query（与 H5 一致）。
-- 题包：`wrong_killed_questions(...)`（已消灭）、`wrong_question_show(...)`（剩余）→ `WrongNotePage`，`items` 为 `WrongQuestion`；`wrong_kill_paper(...)`（待消灭题包，**读**）→ `dict`。
+- 题包：`wrong_killed_questions(...)`（已消灭）、`wrong_question_show(...)`（剩余）→ `WrongNotePage`，`items` 为 `WrongQuestion`；`wrong_kill_paper(...)`（待消灭题包，**读**）→ `dict`。题包接口的 `WrongNotePage.raw` 保留完整 `data`（`pathPrefix` / `paperData` / `answerData` / `userAnswerData`），`items` 只是 `list` 的模型化视图。
 - 写：`submit_wrong_question(payload, *, dry_run=True, confirm=False)`；payload 固定为 `uid/result/startTime/endTime/seconds/rightQstIds` 六项。
 
 ## 5. 模型参考
