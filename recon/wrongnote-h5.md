@@ -204,19 +204,19 @@ getSubmitParams: function (submitData) {
 | `wrongnoteView.916c932e.js` 已消灭/剩余列表 | `kill/question/show`；`student/question/show`；`question/submit` | `@13877`、`@14530`、`@16944` |
 | `wrongnoteKill.fcef1833.js` 消灭错题页 | `questions/kill`；`question/submit` | `@9345`、`@11384` |
 
-## 5. 对 `pyapi` 的直接修正项
+## 5. `pyapi` 修正项（已落地）
 
 | `pyapi` 现状 | 实证 | 建议 |
 |---|---|---|
-| `kill_wrong_questions(payload, dry_run, confirm)` 当写接口 | `questions/kill` 是读，参数 `{bookId,stageId,subjectId,startTime,endTime}` | 改为读方法，返回题包；删除 dry-run 语义 |
-| `submit_wrong_question(payload)` 透传 | 写接口，payload 字段固定（§3.3） | 保留；文档写明 6 个字段 |
-| `wrong_books` 在 API 层注入「全部/练习」 | 哨兵由 H5 页面注入 | 库返回原始数组，或明确标注是库的便利行为 |
-| `wrong_knowledge` / `wrong_rank` 只把 pager 放 body | H5 同时放 query | 请求时追加 `?pager.currentPage=&pager.pageSize=` |
-| `wrong_killed_questions(**params)` / `wrong_question_show(**params)` 透传 | 参数固定（§2 表 #7/#8），且 pager 在 query | 改为显式关键字参数，构造 query |
-| `WrongRank.degree` | 排行行没有 `degree`；实际是 `realname,wrongCount,killedCount,recentKilledCount` | 删除 `degree`，补齐字段 |
-| 分页/题包接口遇 `data={}` 抛 `Up366ResponseError` | `{}` 表示没有题 | 返回空页，不抛 |
-| `start_time=None` 经 `form_encode` 变成 `"None"` | H5 总是发 `YYYY-MM-DD 00:00:00` 或空串 | 省略 None 或补默认时间 |
-| `wrong_rank`/`wrong_knowledge` 的 `orderField` 默认 | 排行可 `wrongCount/killedCount/recentKilledCount`；知识点可 `qTypeName/knowledgeName/wrongTimes/wrongCount` | 文档列出枚举 |
+| `kill_wrong_questions(payload, dry_run, confirm)` 当写接口 | `questions/kill` 是读，参数 `{bookId,stageId,subjectId,startTime,endTime}` | 已改为 `wrong_kill_paper()` 读方法，返回题包；删除 dry-run 语义 |
+| `submit_wrong_question(payload)` 透传 | 写接口，payload 字段固定（§3.3） | 保留；docstring 写明 6 个字段 |
+| `wrong_books` 在 API 层注入「全部/练习」 | 哨兵由 H5 页面注入 | 保留注入，并在 docstring/README 标注为库的 UI 便利行为 |
+| `wrong_knowledge` / `wrong_rank` 只把 pager 放 body | H5 同时放 query（实测 body-only/query-only 等价） | 已在请求中追加 `?pager.currentPage=&pager.pageSize=` |
+| `wrong_killed_questions(**params)` / `wrong_question_show(**params)` 透传 | 参数固定（§2 表 #7/#8），且 pager 在 query | 已改为显式关键字参数并构造 query |
+| `WrongRank.degree` | 排行行没有 `degree`；实际是 `realname,wrongCount,killedCount,recentKilledCount` | 已删除 `degree`，补齐字段 |
+| 分页/题包接口遇 `data={}` / `[]` 抛 `Up366ResponseError` | 空对象或空数组表示没有题 | 已返回空页，不抛 |
+| `start_time=None` 经 `form_encode` 变成 `"None"` | H5 总是发 `YYYY-MM-DD 00:00:00` 或空串 | 已把 None 发为空串 |
+| `wrong_rank`/`wrong_knowledge` 的 `orderField` 默认 | 排行可 `wrongCount/killedCount/recentKilledCount`；知识点可 `qTypeName/knowledgeName/wrongTimes/wrongCount` | 已写入 docstring/README |
 
 **只读 e2e 实测（2026-11-05）**：
 
