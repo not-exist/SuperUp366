@@ -1,0 +1,21 @@
+# ── 研究档案在 main 分支，本分支不跟踪 ─────────────
+/recon/
+/tools/
+/harness/
+/docs/
+/NOTICE.md
+
+# ── 本地草稿（可重建）─────────────────────────────
+/work/
+/extract/
+/test000/
+*.7z
+*.bin
+/conversation-*.txt
+
+# ── Python ────────────────────────────────────────
+__pycache__/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
