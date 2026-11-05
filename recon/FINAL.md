@@ -132,13 +132,13 @@ Vite SPA 自身 **0 条直连 HTTP**——业务全部走 preload 暴露的全�
 
 ## 5. 协议层（`recon/api.md`，468 行）
 
-- **56 条真实 endpoint**（up366 域 46 + 外部 5 + 私有云 minicloud 5），24 个 host，另有 21 条死配置。
+- **去重 95 条 URL、主进程实际可发起 ≈ 52 条 endpoint**（up366 43 + 外部 5 + 私有云 4），24 个 host；死配置/无调用点条目见 `api.md §1.15`。
 - 传输层是 `Electron net.request` 自研封装，不是 axios；POST 默认 `x-www-form-urlencoded`。
 - 7 个固定头：`user-agent: PC-Up366-Student 6.11.0`、`x-requested-with: PC`、`X-App-Name: student-pc`、`clientId: <MachineCode>`、`u3r: <每请求随机 UUID>`、`u3t: <TGT>`、`Authorization: <恒空串，全 bundle 无赋值>`。
 - **没有逐请求签名**。只有登录/短信/成绩提交等敏感接口带 `ut`：`md5(ts).slice(0,10) + md5(payload + 关键词 + md5(ts)) + md5(ts).slice(10)`。
   `ts = md5(String(Date.now()))` 不可逆 ⇒ 服务端无法还原时间、**无法施加时效窗口**。
 - 唯一真 HMAC：文件元信息 `HMAC-SHA1(key="au66ssoI3nGr6DxCHk8KcpVsQ1wYNQId", msg="GETOBJECT"+app+fileIds)`。
-- 鉴权 = `u3t`(TGT) + 401(-21/-22) 后向 sso `/v1/serviceTicket` 换一次性 ST，以 `?ticket=` 重放一次。
+- 鉴权 = **登录 Cookie 为主**（`UP366-C`/`CASTGC`，Domain=`.up366.cn`；实测仅 Cookie 可访问各业务 host，仅 `u3t` 返回 -21）；`u3t`(TGT) 仅在 Cookie 缺失/过期时用于向 sso `/v1/serviceTicket` 换一次性 ST，以 `?ticket=` 重放一次。
 - 登录态：token 落地在 `{saveDir}/setup.cfg` 的 **SQLCipher** 库，`PRAGMA key` 硬编码 `{3E2A243F-7B8B-45C8-9E7D-885A891820A7}`；TGT/ST 仅内存。
 - **无 WebSocket / 无 SSE / 无长连接**，全部请求-响应 + 定时轮询（minicloud status 10s、二维码状态由渲染层轮询）。
 - 环境切换靠 Proxy 把字面量 `up366.cn` 替换为 `up366.com.cn` / `up366demo.cn` / `up366test.cn`。
