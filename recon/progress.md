@@ -101,3 +101,14 @@ security.md 已单点更新至 45,430 B，全文 192433 出现 0 次，结论不
   两端都不传 `courseId`；实测两种方法均返回 `-21` JSON（网关两条路由都存在）。
 - `answer_detail`：PC 调用点 `ExportContinueWritingReport` @3768493（此前误判为死代码），参数 `{courseId,bookId,taskId,uid}`；
   H5 `POST /v2`（chunk-6c496ba5.js@892819）参数 `{uid,bookId,taskId}`；响应均为 `data.paperInfo` + `data.userAnswer`。
+
+### 2026-11-05 有效账号只读 e2e
+
+- 用测试学生账号跑通：`wrong_subjects` / `wrong_subject_stat` / `wrong_books` / `wrong_knowledge` /
+  `wrong_courses` / `wrong_rank` / `wrong_question_show` / `wrong_killed_questions` / `wrong_kill_paper` /
+  `finished_tasks` / `answer_detail` v1+v2；全部 `code=0`，结构与 `recon/wrongnote-h5.md` 一致。
+- 鉴权矩阵：仅 Cookie=`0`，仅 `?ticket=`=`0`，仅 `u3t`=`-21`，无凭证=`-21` → Cookie 或 ST 任一即可，`u3t` 单独无效。
+- 分页：body-only / query-only / 两者同时三者等价（knowledge、rank 都验证）。
+- `finished_tasks`：GET 与 POST 同 `bookId` 返回完全相同的行；`courseId` 被忽略。
+- `answer_detail`：v1/v2 都需要 `{courseId,uid,bookId,taskId}`；`taskId` 取 `contentId`；v2 缺 `courseId` 报 `param_missing`。
+- 写接口 `question/submit` 只做 dry-run，未真实提交（会改动账号数据）。

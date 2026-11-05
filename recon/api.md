@@ -641,7 +641,8 @@
 | --- | --- | --- |
 | bookId | string | 教材 ID（PC 传 `this.Id`，H5 传页面 `bookId`） |
 
-- **方法差异**：PC 端只发 GET，H5 只发 POST；2026-11-05 未认证实测两种方法都返回 `code=-21` JSON（不是 404/405），说明网关两条路由都存在，服务端处理是否一致待有效凭证实测。**两端都不传 `courseId`**；库里的可选 `course_id` 无客户端依据。
+- **方法差异**：PC 端只发 GET，H5 只发 POST；2026-11-05 未认证实测两种方法都返回 `code=-21` JSON（不是 404/405），说明网关两条路由都存在。**两端都不传 `courseId`**；库里的可选 `course_id` 无客户端依据。
+- **2026-11-05 有效账号实测**：同一 `bookId` 的 GET 与 POST 返回**完全相同**的 `taskId` 集合与字段值；额外 `courseId` 被忽略。行字段：`addDate,batchId,bookId,chapterId,firstScore,maxScore,percent,score,seconds,studyDate,taskId,uid`。
 - **响应**：`data` 为数组，每项至少含 `taskId`；客户端以 `data[].taskId` 为键，**整项**作为 `taskScore` 挂到任务上（`I.taskScore=s[I.Id]` @3618176）。H5 另外用 `studyDate` 排序。`taskScore` 其余字段与本地 `TaskScore` 表结构对齐（bookId/taskId/type/pid/study/score/weight/percent/studyDate），但主进程只显式判断 `taskId`。
 - **备注**：仅**非离线模式**请求（`initChapter(e=!1)`，`e` 为真时跳过）；本地已有同 `taskId` 不覆盖（`s[g.taskId]||(s[g.taskId]=g)` @3617410）。失败只写日志"加载分数出错"，不弹窗不阻断。无 ut。
 - **证据**：main/index.js@3617392、3558520、3617410、3618176、3575184；H5 chunk-6b733b35.js@9507、chunk-39edd6e0.js@17926
@@ -662,6 +663,7 @@
 | H5 POST /v2 | uid / bookId / taskId | 来自路由参数；`courseId` 不是必填 |
 
 - **响应**：PC 调用方读取 `data.paperInfo.paperData`、`data.userAnswer.markData`、`data.userAnswer.score`（@3768493 之后 `dealWithResult`）；H5 `showPaper` 读取 `data.paperInfo.{paperData,answerData,cdnPrefix}`、`data.userAnswer.{answerData,markData}`（@892912）。两版结构一致：`data.paperInfo` + `data.userAnswer`。
+- **2026-11-05 有效账号实测**：v1 GET 与 v2 POST 都要求 `{courseId,uid,bookId,taskId}`；`taskId` 必须取 `contentId`（传 `jobId` 会得到空 `paperInfo`）。v2 缺 `courseId` 返回 `code=-1,msg=param_missing`。v1 返回 `data.{paperInfo,userAnswer}`；v2 额外返回 `batchId,courseName,percent,seconds,studyDate,submitDate,taskName`。`paperInfo` 典型键 `answerData,cdnPrefix,duration,paperData,score`；`userAnswer` 典型键 `answerData,batchId,markData,score`。
 - **备注**：此前 recon 判“死代码/主进程无调用点”是漏搜——调用点在 @3768493；v2 路径只存在于 H5 bundle，PC 安装包只有非 v2 路径（@3561535）。两版都返回完整 XML，客户端自行拼接。
 - **证据**：main/index.js@3561535、3572472、3575184、3768493；H5 chunk-6c496ba5.js@892819、@892912
 

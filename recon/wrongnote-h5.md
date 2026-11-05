@@ -16,7 +16,8 @@
    （`pathPrefix/paperData/answerData`），不做任何写操作；真正提交消灭结果的是 `/student/question/submit`。
 5. `wrong_books` 的「全部」/「练习」哨兵项是 **H5 页面 UI 注入**（`chunk-6ff8c6e6.js@12504`），不是服务端返回。
 6. H5 的分页接口把 `pager.currentPage`、`pager.pageSize` **同时**放在 query 与 form body 里；
-   `?pager.currentPage=1&pager.pageSize=100`（`chunk-6ff8c6e6.js@15954` 等）。
+   `?pager.currentPage=1&pager.pageSize=100`（`chunk-6ff8c6e6.js@15954` 等）。实测 body-only、query-only、两者同时都能正确分页。
+7. 2026-11-05 已用有效学生账号完成**只读** e2e：subject/list、stat、book/list、knowledge、course/list、rank、question/show、kill/question/show、questions/kill、finished_tasks、answer_detail v1/v2 全部 `code=0`。写接口只做 dry-run，未真实提交。
 
 ## 1. 鉴权链（H5 → PC 客户端）
 
@@ -77,7 +78,19 @@ curl -sS -X POST 'https://sso.up366.cn/v1/serviceTicket' \
 - 不带 `X-Requested-With` 时网关返回 `302 → http://sso.up366.cn/login?service=…`；
   带 `PC` 或 `XMLHttpRequest` 都返回 JSON。`pyapi` 发的 `x-requested-with: PC` 可用。
 - 只要带 `?ticket=`（即使无效），错误码从 `-21` 变成 `-22`，证明该 host 读取的是 **query 里的 ticket**。
-- `u3t` 头在 H5 中完全没出现；H5 的 `withCredentials` 只是顺带发 Cookie，不是 wrongnote 的必需凭证。
+- `u3t` 头在 H5 中完全没出现。
+
+**有效账号鉴权矩阵**（2026-11-05，每次新 ST，同一 URL）：
+
+| 凭证 | `result.code` |
+|---|---|
+| 仅 `?ticket=<ST>`（无 Cookie、无 u3t） | 0 |
+| 仅 Cookie（无 ticket、无 u3t） | 0 |
+| 仅 `u3t`（无 ticket、无 Cookie） | -21 |
+| ticket + u3t / ticket + Cookie / 三者 | 0 |
+| 无任何凭证 | -21 |
+
+结论：**Cookie 与 `?ticket=` 各自都足以鉴权，`u3t` 单独无效**。pyapi 登录后持有 Cookie，并保留 `-21/-22 → ST → ?ticket=` 重试，两条路都可用。
 
 ## 2. 端点全表（H5 6.12.1）
 
@@ -131,9 +144,9 @@ data = {
 }
 ```
 
-- `data` 为 `{}` 表示**没有题**（已消灭完），不是响应损坏。
+- `data` 为 `{}`（或 `kill/question/show` 的今日列表返回 `[]`）表示**没有题**，不是响应损坏。
   `wrongnoteView.916c932e.js` 用 `isEmptyObject(data)` 判断后显示 `hasNoQuestion`；
-  `wrongnoteKill.fcef1833.js@13625` 判断为空后弹“恭喜你，所有错题已消灭”。
+  `wrongnoteKill.fcef1833.js@13625` 判断为空后弹“恭喜你，所有错题已消灭”。实测 `killFlag=1` 返回 `data:[]`，`killFlag=0` 返回完整题包。
 - 分页大小：show 接口 10；knowledge/rank 100（`3ebc` 模块 `PAGE_SIZE=100`）。
 
 ### 3.2 `questions/kill`（读）
@@ -205,6 +218,15 @@ getSubmitParams: function (submitData) {
 | `start_time=None` 经 `form_encode` 变成 `"None"` | H5 总是发 `YYYY-MM-DD 00:00:00` 或空串 | 省略 None 或补默认时间 |
 | `wrong_rank`/`wrong_knowledge` 的 `orderField` 默认 | 排行可 `wrongCount/killedCount/recentKilledCount`；知识点可 `qTypeName/knowledgeName/wrongTimes/wrongCount` | 文档列出枚举 |
 
+**只读 e2e 实测（2026-11-05）**：
+
+- `wrong_knowledge(book_id="0")` 返回 `data.{list,pager}`；`wrong_question_show` 返回 `data.{pathPrefix,paperData,answerData,userAnswerData,list,pager}`，`option` 里的 `pager` 含 `totalCount/indexPageCount/offset`。
+- `wrong_killed_questions(kill_flag=1)` 返回空 `data:[]`；`kill_flag=0` 返回题包和 `list`。
+- `wrong_kill_paper(book_id="0")` 返回 `{pathPrefix,paperData,answerData}`；没有待消灭题的书返回 `{}`。
+- `wrong_rank` 行字段为 `realname,wrongCount,killedCount,recentKilledCount,uid`；`pager` 含 `offset/totalCount/indexPageCount`。
+- `finished_tasks` 的 GET 与 POST 返回**完全相同**的 `taskId` 集合与字段值；额外 `courseId` 被忽略。行字段：`addDate,batchId,bookId,chapterId,firstScore,maxScore,percent,score,seconds,studyDate,taskId,uid`。
+- `answer_detail` v1（GET）与 v2（POST）都要求 `courseId,uid,bookId,taskId`；`taskId` 取 `contentId`（传 `jobId` 会得到空 `paperInfo`）。v2 缺 `courseId` 返回 `code=-1,msg=param_missing`。v1 返回 `data.{paperInfo,userAnswer}`；v2 额外返回 `batchId,courseName,percent,seconds,studyDate,submitDate,taskName`。
+
 ## 6. 复现
 
 ```bash
@@ -225,8 +247,9 @@ python tools/grep_ctx.py extract/app/dist/preload/index.js "redirect://getServic
 python tools/grep_ctx.py extract/app/dist/main/main-window.js "registerStringProtocol(\"redirect\"" 1500 900 1
 ```
 
-## 7. 仍未验证
+## 7. 实测状态
 
-- 用**有效 TGT** 走完整链路（`-21 → sso -24 → ?ticket= → code 0`）未实测；需要账号，见 `pyapi` README 的安全约束。
-- 服务端是否读取 body 中的 `pager.pageSize`（相对于 query）未实测；H5 两边都发，库应至少补齐 query。
-- `wrongnote-api` 是否校验 `u3t` 头未实测；H5 不发该头，按 ticket 鉴权推断为不需要。
+- 2026-11-05 已用有效学生账号完成只读 e2e；上述 10 个读取路径全部 `code=0`，返回结构与本文章节一致。
+- 写接口 `question/submit` 只做 dry-run，**未真实提交**（会改动账号数据）；payload 六字段由 H5 源码确认。
+- 鉴权矩阵已确认：Cookie 或 `?ticket=` 任一即可，`u3t` 单独无效。
+- 分页已确认：body-only / query-only / 两者同时三者等价；H5 同时发，库也同时发。
