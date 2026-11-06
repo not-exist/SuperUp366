@@ -28,6 +28,11 @@ ENDPOINTS = {
         base_url="https://studytask-api.up366.cn",
         path="/client/student/course/job",
     ),
+    "course_finished_jobs": Endpoint(
+        name="course_finished_jobs",
+        base_url="https://studytask-api.up366.cn",
+        path="/client/student/all/course/finish/job/v2",
+    ),
     "job_info": Endpoint(
         name="job_info",
         base_url="https://studytask-api.up366.cn",

@@ -62,6 +62,33 @@ class JobAPIMixin:
             return []
         return self._array_data(payload)
 
+    def course_finished_jobs(self, course_id, *, version: str = "") -> dict:
+        """Return finished/returned job rows for one course.
+
+        The H5 homework page fetches this endpoint in parallel with
+        ``jobs(course_id)`` and merges ``finishedList`` / ``returnedList``
+        rows into the job list by ``studyTaskId == jobId``.  The ``data``
+        object is returned unchanged (``finishedList``, ``returnedList``,
+        ``complexFinishedList``) so callers can apply their own status rules.
+
+        ``version`` is an optional client cache version; pass an empty string
+        for a full response (the H5 client does this when it has no cache).
+        """
+        endpoint = ENDPOINTS["course_finished_jobs"]
+        payload = self._request(
+            endpoint.method,
+            endpoint.base_url + endpoint.path,
+            data={"courseId": course_id, "version": version},
+        )
+        data = payload.get("data")
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            raise Up366ResponseError(
+                "course finished-jobs response did not contain a data object"
+            )
+        return data
+
     def answer_detail(self, params: Mapping, *, use_v2: bool = True) -> dict:
         """Return a task's paper/answer/student-answer XML.
 

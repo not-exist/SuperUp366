@@ -4,7 +4,7 @@
 
 > 只描述代码里**真实存在**的公开 API。以下划线开头的方法为内部实现，**非公开 API**，本文不作 API 介绍。标「本批新增 / 实验性 / 未验证」者按标注理解，勿凭名称臆测其已在线上确认。
 
-本轮（catalog rewrite）把端点收拢到 `endpoints.py`（冻结 `Endpoint` dataclass + `ENDPOINTS` 字典，32 条），并新增课本 / 普通作业 / 错题本三组方法，来自 `book.py` / `job_api.py` / `wrongnote.py` 三个 mixin（`class Up366(BookAPI, WrongNoteAPI, JobAPIMixin)`）。
+本轮（catalog rewrite）把端点收拢到 `endpoints.py`（冻结 `Endpoint` dataclass + `ENDPOINTS` 字典，33 条），并新增课本 / 普通作业 / 错题本三组方法，来自 `book.py` / `job_api.py` / `wrongnote.py` 三个 mixin（`class Up366(BookAPI, WrongNoteAPI, JobAPIMixin)`）。
 
 ## 1. 安装与导入
 
@@ -119,6 +119,7 @@ if pk is not None:
 | 本批新增·课本 | `offline_books()` | `list[str]` |
 | 本批新增·课本 | `book_plan(course_id, book_id, *, book_type=1)` | `list[dict]` |
 | 本批新增·作业 | `finished_tasks(book_id)` | `list[dict]` |
+| 本批新增·作业 | `course_finished_jobs(course_id, *, version="")` | `dict` |
 | 本批新增·作业 | `answer_detail(params, *, use_v2=True)` | `dict` |
 | 本批新增·作业 | `test_all_data(test_id, uid)` | `dict` |
 | 本批新增·作业 | `paper_zip_info(paper_id)` | `dict` |
@@ -187,7 +188,7 @@ submit_word_pk(job: Job, score: int,
 
 只读查询 + 两类写接口（写接口默认 dry-run，见第 8 节）。
 
-- 只读：`finished_tasks(book_id)` 已完成任务分数（只传 `bookId`；H5 用 POST、PC 用 GET，网关两条路由都接受，本库走 POST）；`answer_detail(params, *, use_v2=True)` 作答详情（两版参数相同：`{courseId,uid,bookId,taskId}`；`use_v2=True` → POST `/v2`，`use_v2=False` → GET 非 v2；响应均为 `data.paperInfo` + `data.userAnswer`）；`test_all_data(test_id, uid)` 测评全量数据（读 `data.testInfo.paperId`；需要真实的在线测评 `testId`，本次抽样作业未找到成功路径）；`paper_zip_info(paper_id)` 试卷包地址 / 版本；`paper_detail(paper_id)` 返回 **`data.paperData` 的 XML 字符串**（非 dict）；`chapter_questions(book_id, chapter_id, file_id)` 章节题目；`task_linked(book_id, task_id, *, type=1)` 任务关联目录；`job_status(course_id, job_id, content_id, book_id)` → `JobStatus`（复用 `job_info` 端点、**不新增端点行**，把 `data` 交给 `JobStatus.from_dict()`，返回模型而非原始 dict；请求体与 `job_info` 完全相同，`studyTaskId` 恒等于 `job_id`）。
+- 只读：`course_finished_jobs(course_id, *, version="")` 课程完成/退回作业列表（H5 作业页用它按 `studyTaskId == jobId` 合并完成状态；返回 `data`，含 `finishedList` / `returnedList` / `complexFinishedList`）；`finished_tasks(book_id)` 已完成任务分数（只传 `bookId`；H5 用 POST、PC 用 GET，网关两条路由都接受，本库走 POST）；`answer_detail(params, *, use_v2=True)` 作答详情（两版参数相同：`{courseId,uid,bookId,taskId}`；`use_v2=True` → POST `/v2`，`use_v2=False` → GET 非 v2；响应均为 `data.paperInfo` + `data.userAnswer`）；`test_all_data(test_id, uid)` 测评全量数据（读 `data.testInfo.paperId`；需要真实的在线测评 `testId`，本次抽样作业未找到成功路径）；`paper_zip_info(paper_id)` 试卷包地址 / 版本；`paper_detail(paper_id)` 返回 **`data.paperData` 的 XML 字符串**（非 dict）；`chapter_questions(book_id, chapter_id, file_id)` 章节题目；`task_linked(book_id, task_id, *, type=1)` 任务关联目录；`job_status(course_id, job_id, content_id, book_id)` → `JobStatus`（复用 `job_info` 端点、**不新增端点行**，把 `data` 交给 `JobStatus.from_dict()`，返回模型而非原始 dict；请求体与 `job_info` 完全相同，`studyTaskId` 恒等于 `job_id`）。
 - 写：`submit_task_score(job, row, *, submit_type="0", dry_run=True, confirm=False, verify=True)`（`verify=True` 提交成功后回读 `job_status()` 校验，不自动重提）；`submit_online_test(row, *, dry_run=True, confirm=False)`。
 
 ### 4.6 本批新增 · 错题本 API（`WrongNoteAPI`）
@@ -247,7 +248,7 @@ from up366.wrongnote import (WrongSubject, WrongSubjectStat, WrongBook, WrongKno
 
 ## 6. Endpoint 全表
 
-所有业务请求带第 3.2 节 7 个头与 `cookies`；响应按 `result.code` 判断（0 成功、`-21/-22` 自动换 ST 重放一次）。默认超时 `DEFAULT_TIMEOUT = 20.0` 秒。目录见 `endpoints.py: ENDPOINTS`（32 条冻结 `Endpoint`：默认 `POST` / `body=form` / `write=False`，可带 `fallback` / `write`）。下表按 host 分组（顺序：sso、course-api、studytask-api、book-api、dsb-api、xot-api、qlib-api、study-api、wordsbtl-api、words-v2-api、wrongnote-api）；sso 两条为 `client.py` 常量，不在字典内。`params` 为请求参数语义，`returns` 为取用字段。
+所有业务请求带第 3.2 节 7 个头与 `cookies`；响应按 `result.code` 判断（0 成功、`-21/-22` 自动换 ST 重放一次）。默认超时 `DEFAULT_TIMEOUT = 20.0` 秒。目录见 `endpoints.py: ENDPOINTS`（33 条冻结 `Endpoint`：默认 `POST` / `body=form` / `write=False`，可带 `fallback` / `write`）。下表按 host 分组（顺序：sso、course-api、studytask-api、book-api、dsb-api、xot-api、qlib-api、study-api、wordsbtl-api、words-v2-api、wrongnote-api）；sso 两条为 `client.py` 常量，不在字典内。`params` 为请求参数语义，`returns` 为取用字段。
 
 | Host | 方法 | Path | params | returns | 对应方法 / 备注 |
 |---|---|---|---|---|---|
@@ -255,6 +256,7 @@ from up366.wrongnote import (WrongSubject, WrongSubjectStat, WrongBook, WrongKno
 | sso | POST | `/v1/serviceTicket` | `{service:<完整URL>}` | `data.serverTicket` | 换 ST `code=-24`，`-21/-22` 自动 |
 | course-api | POST | `/client/course/list-of-student/v2` | `{status:1, pager.pageSize:999}` | `data.list` | `courses()` |
 | studytask-api | POST | `/client/student/course/job` | `{courseId, pageIdFlag:1, version:""}` | `data.allTaskList` | `jobs()` |
+| studytask-api | POST | `/client/student/all/course/finish/job/v2` | `{courseId, version}` | `data.finishedList` / `returnedList` / `complexFinishedList` | `course_finished_jobs()`；H5 作业列表按 `studyTaskId == jobId` 合并完成状态 |
 | studytask-api | POST | `/client/student/job/info` | `{courseId, jobId, studyTaskId, contentId, bookId}` | `data` 对象 | `job_info()`；`job_status()` 复用本端点并解析为 `JobStatus` |
 | studytask-api | POST | `/client/book/plan` | `{courseId, bookId, bookType:1}` | `data` 数组 | `book_plan()` |
 | book-api | POST | `/client/books/buy-book` | 空 body（`body=none`） | `data` 数组 | `books()` |
@@ -365,6 +367,7 @@ preview = session.submit_wrong_question(payload, dry_run=True)
 - **错题写接口 payload 已确认**：`submit_wrong_question` 的 `uid/result/startTime/endTime/seconds/rightQstIds` 六个字段来自 H5 `question/submit`（`recon/wrongnote-h5.md` §3.3）；`questions/kill` 是**读**接口，已从写接口改为 `wrong_kill_paper()`。写接口仍会真实改动账号数据，默认 dry-run。
 - **`answer_detail` 参数已确认**：两版都是 `{courseId,uid,bookId,taskId}`；`use_v2=True` → POST `/v2`（H5 的 `courseId` 来自父路由，缺省报 `param_missing`），`use_v2=False` → GET 非 v2（PC 调用点 `main/index.js@3768493`）。`taskId` 取 `contentId`（不是 `jobId`）；响应均为 `data.paperInfo` + `data.userAnswer`。2026-11-05 用真实账号只读实测通过。
 - **`finished_tasks` 方法与参数已确认**：PC 用 GET、H5 用 POST，两端都只传 `bookId`；2026-11-05 真实账号实测两种方法返回完全相同的行，额外 `courseId` 被忽略。本库走 POST，删除了无依据的 `courseId` 参数。
+- **`course_finished_jobs` 来自 H5 作业列表（代码确认，未单独线上实测）**：`POST https://studytask-api.up366.cn/client/student/all/course/finish/job/v2`，body `{courseId, version}`；H5 与 `jobs()` 并行请求，按 `finishedList[].studyTaskId === jobId` 合并，`returnedList` 表示退回重做，`complexFinishedList` 用于复合任务子项。课程作业列表本身不保证携带 `extParam.taskStatus` / `stuStatus`，只看列表字段会漏掉已完成作业。
 - **无隐式缓存**：官方客户端对 `book/info` / `task/linked` / 离线书籍做 2h 或 SQLite 缓存，本库每次发真实请求，不缓存。
 - **无自动重登 / TGT 刷新**：登录态过期需重新 `login()`；`password_hash` 已存但无重登方法。
 - **写接口默认不真实写入**：默认 `dry_run=True` 且零请求，须 `dry_run=False` + `confirm=True`（第 8 节）；单词 PK 提交是唯一默认即发送的写入口。

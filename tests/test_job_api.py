@@ -11,6 +11,9 @@ from up366 import Up366, Up366APIError
 from up366.job import Job, JobStatus
 
 FINISHED_TASKS_URL = "https://dsb-api.up366.cn/client/book/finished-task/list"
+COURSE_FINISHED_JOBS_URL = (
+    "https://studytask-api.up366.cn/client/student/all/course/finish/job/v2"
+)
 ANSWER_DETAIL_URL = "https://dsb-api.up366.cn/client/student/task/answer/detail/v2"
 ANSWER_DETAIL_V1_URL = "https://dsb-api.up366.cn/client/student/task/answer/detail"
 TEST_ALL_DATA_URL = "https://xot-api.up366.cn/client/onlinetesting/alldata"
@@ -92,6 +95,25 @@ def test_finished_tasks_posts_book_only_and_returns_array(monkeypatch):
 def test_finished_tasks_returns_empty_when_data_missing(monkeypatch):
     _capture(monkeypatch, {"result": {"code": 0, "msg": "ok"}})
     assert _session().finished_tasks("BOOK-1") == []
+
+
+def test_course_finished_jobs_posts_course_and_version(monkeypatch):
+    data = {
+        "finishedList": [{"studyTaskId": "JOB-1", "score": 8}],
+        "returnedList": [{"studyTaskId": "JOB-2"}],
+        "complexFinishedList": [],
+    }
+    captured = _capture(monkeypatch, _ok(data))
+    result = _session().course_finished_jobs(9222783, version="v1")
+    assert result == data
+    assert captured["method"] == "POST"
+    assert captured["url"] == COURSE_FINISHED_JOBS_URL
+    assert captured["data"] == {"courseId": "9222783", "version": "v1"}
+
+
+def test_course_finished_jobs_returns_empty_when_data_missing(monkeypatch):
+    _capture(monkeypatch, {"result": {"code": 0, "msg": "ok"}})
+    assert _session().course_finished_jobs(1) == {}
 
 
 def test_answer_detail_posts_params_as_data(monkeypatch):

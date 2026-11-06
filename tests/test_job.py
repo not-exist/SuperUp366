@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from up366 import Job
+from up366.job import JobStatus
 
 
 def test_job_exposes_core_fields_and_parses_ext_param():
@@ -74,3 +75,35 @@ def test_job_detects_word_pk_from_xot_param():
     assert word_pk.xot_param["pkBucketId"] == "BUCKET-1"
     assert ordinary.is_word_pk is False
 
+
+def test_job_finished_accepts_numeric_strings():
+    finished_by_task = Job.from_dict(
+        {
+            "jobId": "JOB-1",
+            "extParam": json.dumps({"taskStatus": "1"}),
+        }
+    )
+    finished_by_stu = Job.from_dict(
+        {
+            "jobId": "JOB-2",
+            "extParam": json.dumps({"stuStatus": "3"}),
+        }
+    )
+    unfinished = Job.from_dict(
+        {
+            "jobId": "JOB-3",
+            "extParam": json.dumps({"taskStatus": "0", "stuStatus": "1"}),
+        }
+    )
+
+    assert finished_by_task.is_finished is True
+    assert finished_by_stu.is_finished is True
+    assert unfinished.is_finished is False
+
+
+def test_job_status_finished_accepts_numeric_strings():
+    status = JobStatus.from_dict(
+        {"taskStatus": "1", "stuStatus": "0", "submitTime": 1}
+    )
+
+    assert status.is_finished is True

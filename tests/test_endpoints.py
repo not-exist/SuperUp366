@@ -46,6 +46,13 @@ def test_endpoints_registry_keys_match_endpoint_names():
             False,
         ),
         (
+            "course_finished_jobs",
+            "https://studytask-api.up366.cn",
+            "/client/student/all/course/finish/job/v2",
+            None,
+            False,
+        ),
+        (
             "job_info",
             "https://studytask-api.up366.cn",
             "/client/student/job/info",

@@ -19,10 +19,28 @@ def _parse_ext_param(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _as_number(value: Any) -> float | int | None:
+    """Coerce the server's status value, which may be a number or a string."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return float(text) if "." in text else int(text)
+        except ValueError:
+            return None
+    return None
+
+
 def _finished(task_status: Any, stu_status: Any) -> bool:
-    if task_status == 1:
+    if _as_number(task_status) == 1:
         return True
-    return isinstance(stu_status, (int, float)) and stu_status > 1
+    stu = _as_number(stu_status)
+    return stu is not None and stu > 1
 
 
 class Job:
