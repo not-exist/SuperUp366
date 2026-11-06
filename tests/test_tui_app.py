@@ -7,6 +7,11 @@ from pathlib import Path
 from up366 import Job
 from up366_tui import app as app_module
 from up366_tui.app import App
+from up366_tui.jobstatus import (
+    STATE_FINISHED,
+    STATE_RETURNED,
+    STATE_UNFINISHED,
+)
 from up366_tui.ui import UI
 
 ATTACHMENT = (
@@ -169,3 +174,64 @@ def test_readaloud_flow_saves_plan_without_submitting(monkeypatch, tmp_path: Pat
     assert len(plan.mp3_files) == 1
     assert plan.submission == "not_implemented"
     assert plan_path.exists()
+
+
+class _JobListSession:
+    username = "tester"
+    user_type = 102
+
+    def __init__(self, status_data: dict) -> None:
+        self.status_data = status_data
+
+    def jobs(self, course_id):
+        return [_job(word_pk=False)]
+
+    def course_finished_jobs(self, course_id):
+        return self.status_data
+
+
+def test_job_list_merges_finished_status() -> None:
+    session = _JobListSession(
+        {"finishedList": [{"studyTaskId": "JOB-1", "score": 8}]}
+    )
+    app = App(session, UI(color=False, clear_screen=False))
+    app.course = {"courseId": 1, "courseName": "Test"}
+
+    jobs = app._jobs_for_current_course()
+    state = app._job_state(jobs[0])
+
+    assert state.state == STATE_FINISHED
+    assert state.score == 8
+    assert "已交" in " ".join(app._job_tags(jobs[0]))
+
+
+def test_job_list_marks_returned_job() -> None:
+    session = _JobListSession({"returnedList": [{"studyTaskId": "JOB-1"}]})
+    app = App(session, UI(color=False, clear_screen=False))
+    app.course = {"courseId": 1, "courseName": "Test"}
+
+    jobs = app._jobs_for_current_course()
+    state = app._job_state(jobs[0])
+
+    assert state.state == STATE_RETURNED
+    assert "已退回" in " ".join(app._job_tags(jobs[0]))
+
+
+class _DetailSession(_JobListSession):
+    def job_info(self, *args):
+        return {"taskStatus": 0, "stuStatus": 0, "paperId": "PAPER-1"}
+
+
+def test_job_info_detail_overrides_finished_list() -> None:
+    session = _DetailSession(
+        {"finishedList": [{"studyTaskId": "JOB-1", "score": 8}]}
+    )
+    app = App(session, UI(color=False, clear_screen=False))
+    app.course = {"courseId": 1, "courseName": "Test"}
+
+    jobs = app._jobs_for_current_course()
+    app._fetch_job_detail(jobs[0])
+    state = app._job_state(jobs[0])
+
+    assert state.state == STATE_UNFINISHED
+    assert state.source == "job_info"

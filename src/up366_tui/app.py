@@ -10,6 +10,14 @@ from typing import Any
 from up366 import Job, Up366
 from up366.errors import Up366APIError, Up366Error
 
+from .jobstatus import (
+    STATE_FINISHED,
+    STATE_UNFINISHED,
+    JobState,
+    build_status_indexes,
+    detail_state,
+    resolve_job_state,
+)
 from .paper import Paper, parse_paper_xml, question_type_name
 from .readaloud import build_manual_plan, build_plan, save_plan, submit_plan
 from .ui import UI, UserExit
@@ -40,6 +48,10 @@ class App:
         self.job_detail: dict[str, Any] | None = None
         self.papers: dict[str, Paper | None] = {}
         self.buckets: dict[str, list[dict[str, Any]]] = {}
+        self.finished_by_task: dict[str, dict[str, Any]] = {}
+        self.returned_by_task: dict[str, dict[str, Any]] = {}
+        self.status_course_id: Any = None
+        self.detail_status: dict[str, str] = {}
 
     # --- lifecycle -------------------------------------------------
 
@@ -136,7 +148,7 @@ class App:
             tags.append("[单词PK]")
         elif any(keyword in job.name for keyword in ("跟读", "朗读")):
             tags.append("[跟读?]")
-        tags.append("[已交]" if job.is_finished else "[未交]")
+        tags.append(f"[{self._job_state(job).label}]")
         return tags
 
     # --- course / job state ---------------------------------------
@@ -190,6 +202,10 @@ class App:
             self.jobs_course_id = None
             self.job = None
             self.job_detail = None
+            self.status_course_id = None
+            self.finished_by_task = {}
+            self.returned_by_task = {}
+            self.detail_status = {}
             self.select_job()
             return
 
@@ -200,17 +216,14 @@ class App:
             self.ui.pause()
             return
         while True:
-            if self.jobs_course_id != course_id:
-                self.ui.info("正在读取作业列表…")
-                self.jobs = self.session.jobs(course_id)
-                self.jobs_course_id = course_id
-            if not self.jobs:
+            jobs = self._ensure_jobs(course_id)
+            if not jobs:
                 self.ui.warn("该课程没有作业。")
                 self.ui.pause()
                 return
             self.ui.clear()
             self.ui.title("作业列表")
-            for index, job in enumerate(self.jobs, 1):
+            for index, job in enumerate(jobs, 1):
                 tags = " ".join(self._job_tags(job))
                 self.ui.line(f"  {index:>2}) {job.name}  {tags}")
             self.ui.line("   r) 刷新")
@@ -221,13 +234,14 @@ class App:
             if raw.lower() == "r":
                 self.jobs = []
                 self.jobs_course_id = None
+                self.status_course_id = None
                 continue
-            index = self.ui.parse_index(raw, len(self.jobs))
+            index = self.ui.parse_index(raw, len(jobs))
             if index is None:
                 self.ui.error("无效选择。")
                 self.ui.pause()
                 continue
-            self._set_job(self.jobs[index])
+            self._set_job(jobs[index])
             return
 
     def _set_job(self, job: Job) -> None:
@@ -240,8 +254,9 @@ class App:
         self.ui.line(f"contentId: {job.content_id}")
         self.ui.line(f"bookId: {job.book_id}")
         self.ui.line(f"courseId: {job.course_id}")
-        self.ui.line(f"状态: {'已交' if job.is_finished else '未交'}")
         detail = self._fetch_job_detail(job)
+        state = self._job_state(job)
+        self.ui.line(f"状态: {state.label}（来源: {state.source}）")
         if detail:
             self.ui.line(
                 f"taskStatus: {detail.get('taskStatus')}  "
@@ -275,19 +290,51 @@ class App:
         except Up366Error as exc:
             self.ui.warn(f"作业详情读取失败：{exc}")
             return None
+        if job.job_id:
+            state = detail_state(detail)
+            if state is not None:
+                self.detail_status[str(job.job_id)] = state
         if self.job is job:
             self.job_detail = detail
         return detail
+
+    def _load_course_status(self, course_id: Any, *, force: bool = False) -> None:
+        if not force and self.status_course_id == course_id:
+            return
+        self.status_course_id = course_id
+        try:
+            data = self.session.course_finished_jobs(course_id)
+        except Up366Error as exc:
+            self.finished_by_task = {}
+            self.returned_by_task = {}
+            self.ui.warn(f"完成状态读取失败（仅使用作业字段）：{exc}")
+            return
+        self.finished_by_task, self.returned_by_task = build_status_indexes(data)
+
+    def _ensure_jobs(self, course_id: Any, *, force: bool = False) -> list[Job]:
+        if force or self.jobs_course_id != course_id:
+            self.ui.info("正在读取作业列表…")
+            self.jobs = self.session.jobs(course_id)
+            self.jobs_course_id = course_id
+            if force:
+                self.detail_status.clear()
+            self._load_course_status(course_id, force=True)
+        return self.jobs
+
+    def _job_state(self, job: Job) -> JobState:
+        key = str(job.job_id) if job.job_id else ""
+        return resolve_job_state(
+            job,
+            finished=self.finished_by_task,
+            returned=self.returned_by_task,
+            detail_status=self.detail_status.get(key) if key else None,
+        )
 
     def _jobs_for_current_course(self) -> list[Job]:
         course_id = self._course_id()
         if course_id is None:
             return []
-        if self.jobs_course_id != course_id:
-            self.ui.info("正在读取作业列表…")
-            self.jobs = self.session.jobs(course_id)
-            self.jobs_course_id = course_id
-        return self.jobs
+        return self._ensure_jobs(course_id)
 
     def _choose_job_from(self, candidates: list[Job], title: str) -> Job | None:
         while True:
@@ -350,8 +397,11 @@ class App:
         self.ui.title("单词 PK")
         self.ui.line(f"作业: {job.name}")
         self.ui.line(f"词库可用单词: {len(pool)}")
-        if job.is_finished:
-            self.ui.warn("该作业在列表中显示为已完成；重复提交预计返回 -13。")
+        state = self._job_state(job)
+        if state.is_finished:
+            self.ui.warn(
+                f"该作业显示为「{state.label}」；重复提交预计返回 -13。"
+            )
             if not self.ui.ask_yes_no("仍然继续？", False):
                 return
 
@@ -394,7 +444,9 @@ class App:
         self.ui.ok("提交成功。")
         if result:
             self.ui.line(json.dumps(result, ensure_ascii=False, indent=2)[:3000])
-        self._refresh_job_status(job)
+        if job.job_id:
+            self.detail_status[str(job.job_id)] = STATE_FINISHED
+        self._refresh_job_status(job, allow_unfinished=False)
         self.ui.pause()
 
     def _show_word_pk_preview(self, selection: Any) -> None:
@@ -413,7 +465,9 @@ class App:
         if selection.total > 50:
             self.ui.line(f"… 其余 {selection.total - 50} 词未展开")
 
-    def _refresh_job_status(self, job: Job) -> None:
+    def _refresh_job_status(
+        self, job: Job, *, allow_unfinished: bool = True
+    ) -> None:
         args = self._job_info_args(job)
         if args is None:
             return
@@ -422,6 +476,14 @@ class App:
         except Up366Error as exc:
             self.ui.warn(f"作业状态刷新失败：{exc}")
             return
+        key = str(job.job_id) if job.job_id else ""
+        if key:
+            if status.is_finished:
+                self.detail_status[key] = STATE_FINISHED
+            elif allow_unfinished:
+                self.detail_status[key] = STATE_UNFINISHED
+            else:
+                self.ui.warn("服务器暂未反映完成状态；已按提交成功标记为已交。")
         self.ui.line(
             f"作业状态：taskStatus={status.task_status}  "
             f"stuStatus={status.stu_status}  "
@@ -648,8 +710,9 @@ class App:
             f"courseId: {job.course_id}  contentId: {job.content_id}  "
             f"bookId: {job.book_id}"
         )
-        self.ui.line(f"状态: {'已交' if job.is_finished else '未交'}")
         detail = self._fetch_job_detail(job, force=True)
+        state = self._job_state(job)
+        self.ui.line(f"状态: {state.label}（来源: {state.source}）")
         if detail:
             self.ui.line("")
             self.ui.line("job/info:")

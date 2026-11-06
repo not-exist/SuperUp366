@@ -9,7 +9,7 @@
 | 功能 | 状态 |
 |---|---|
 | 账号口令登录、课程 / 作业浏览 | ✅ |
-| 作业列表标记（单词 PK / 疑似跟读 / 已交） | ✅ |
+| 作业列表标记（单词 PK / 疑似跟读 / 已交 / 未交 / 已过期 / 已退回） | ✅ |
 | 作业详情（`job/info` 原始 JSON） | ✅ |
 | 试卷结构解析与题型统计 | ✅ |
 | **单词 PK 提交**（输入分数与 total，随机抽词） | ✅ |
@@ -60,6 +60,19 @@ python -m up366_tui
 ```powershell
 up366-tui --username <账号> --password <口令>
 ```
+
+## 作业完成状态
+
+课程作业列表接口 `/client/student/course/job` **不保证**每个作业都带完成标记。TUI 按官方 H5 作业页的做法合并状态：
+
+1. 加载作业列表时并行请求 `/client/student/all/course/finish/job/v2`；
+2. 用 `finishedList[].studyTaskId == jobId` 标记 `[已交]`；
+3. `returnedList` 标记 `[已退回]`（退回重做）；
+4. 选中作业后再用 `job/info` 的 `taskStatus` / `stuStatus` 校正（该字段是完成判据）；
+5. 列表字段兜底规则与 H5 一致：`type == 1` 看 `extParam.taskStatus == 1`，`type == 3` 看 `extParam.stuStatus > 1`；
+6. 未完成且已过 `endTime` 显示 `[已过期]`；无法判定的类型显示 `[状态?]`。
+
+> 在作业列表中按 `r` 可强制刷新作业与完成状态。
 
 ## 单词 PK 提交
 
