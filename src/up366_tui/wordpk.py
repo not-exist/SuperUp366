@@ -83,7 +83,7 @@ def select_word_pk_words(
         raise ValueError(
             f"词库只有 {len(pool)} 个可用单词，不足以抽取 {total} 个"
         )
-    picked = (rng or Random()).sample(pool, total)
+    picked = (rng if rng is not None else Random()).sample(pool, total)
     return WordPkSelection(
         score=score,
         total=total,
