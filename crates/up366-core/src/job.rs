@@ -55,6 +55,9 @@ mod tests {
     fn word_pk_hint() {
         assert_eq!(JobKind::hint_from_title("单词卡 - Unit 1"), JobKind::WordPk);
         assert_eq!(JobKind::hint_from_title("选择单词"), JobKind::Unknown);
-        assert_eq!(JobKind::hint_from_title("Unit 3 阅读理解"), JobKind::Unknown);
+        assert_eq!(
+            JobKind::hint_from_title("Unit 3 阅读理解"),
+            JobKind::Unknown
+        );
     }
 }

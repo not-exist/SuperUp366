@@ -45,7 +45,10 @@ pub enum DomainError {
 
 impl DomainError {
     pub fn api(code: i64, message: impl Into<String>) -> Self {
-        Self::Api { code, message: message.into() }
+        Self::Api {
+            code,
+            message: message.into(),
+        }
     }
 
     /// Whether the UI should offer a retry button for this error.
