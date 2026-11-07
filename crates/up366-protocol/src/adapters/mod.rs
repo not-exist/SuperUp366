@@ -8,11 +8,13 @@
 pub mod answers;
 pub mod books;
 pub mod catalog;
+pub mod wordpk;
 pub mod words;
 
 pub use answers::{answer_detail, answer_detail_v1, answer_detail_v2, paper_detail};
 pub use books::{book_info, book_plan, book_tree, books};
 pub use catalog::{course_finished_jobs, courses, finished_tasks, job_info, jobs};
+pub use wordpk::{submit_word_pk, WordPkSubmission};
 pub use words::bucket_words;
 
 use serde::de::DeserializeOwned;
