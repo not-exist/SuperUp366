@@ -16,6 +16,8 @@ use up366_core::AccountId;
 use up366_protocol::{Client, Session};
 use up366_store::{MemoryStore, SecretStore};
 
+use crate::confirm::Confirmations;
+
 /// A live session for one account.
 pub struct AccountRuntime {
     /// HTTP client carrying this account's cookies and TGT.
@@ -34,6 +36,8 @@ pub struct AppState {
     pub active: RwLock<Option<AccountId>>,
     /// Per-account HTTP clients.
     pub runtimes: RwLock<HashMap<AccountId, AccountRuntime>>,
+    /// Pending writes awaiting explicit confirmation.
+    pub confirmations: Confirmations,
 }
 
 impl AppState {
@@ -60,6 +64,7 @@ impl AppState {
             secrets,
             active: RwLock::new(None),
             runtimes: RwLock::new(HashMap::new()),
+            confirmations: Confirmations::new(),
         }
     }
 

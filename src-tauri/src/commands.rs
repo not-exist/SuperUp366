@@ -12,3 +12,4 @@ pub mod books;
 pub mod catalog;
 pub mod homework;
 pub mod system;
+pub mod wordpk;
