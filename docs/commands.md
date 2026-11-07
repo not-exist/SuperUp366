@@ -24,6 +24,9 @@ Error codes come from `up366_core::DomainError::code`:
 | `account_switch` | `account_id` | `Account` |
 | `account_logout` | `account_id` | `null` |
 
+`account_login` never stores the password: only the resulting session (TGT,
+cookies, device id) is persisted in the OS credential store.
+
 `Account` contains only non-sensitive fields:
 `account_id, username, display_name, school_name, active, session_valid,
 expires_at`. Session secrets stay in the OS credential store.
@@ -78,31 +81,47 @@ collapsed raw view.
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `word_pk_preview` | `account_id, job_id` | `WordPkPreview` |
-| `word_pk_submit` | `account_id, job_id, answers` | `SubmitResult` |
+| `wordpk_preview` | `account_id, job_id` | `WordPkPreview` (includes `confirm_token`) |
+| `wordpk_submit` | `confirm_token, answers` | `WordPkResult` |
+
+The submit call re-reads the bucket from the server, so the submitted words are
+the words the server still returns, and the token is consumed before the
+network call so a double click cannot submit twice.
 
 ## Read-aloud
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `read_aloud_get` | `account_id, job_id` | `ReadAloudTask` |
-| `read_aloud_upload` | `account_id, job_id, question_id, file_name, data_base64` | `UploadResult` |
-| `read_aloud_submit` | `account_id, job_id, dry_run` | `SubmitResult` |
+| `readaloud_get` | `account_id, job_id` | `ReadAloudTask` |
+| `readaloud_upload` | `account_id, job_id, recording{question_id, path, file_name}` | `ReadAloudUpload` |
+| `readaloud_submit` | `account_id, job_id, dry_run` | `ReadAloudPreview` |
 
-Upload and submit are separate commands on purpose: the UI must be able to show
-"uploaded" without claiming "submitted". `dry_run` defaults to true while the
-submission shape is still in `docs/protocol/to-probe.md`.
+Upload and submit are separate on purpose. Two limits are enforced in code, not
+just in copy:
+
+- `readaloud_upload` only **validates** the mp3 (header, size, hash). It
+  returns `record_url: null`, meaning the slot is "ready" — the OSS transfer is
+  not wired.
+- `readaloud_submit` returns a preview by default and the guarded protocol
+  layer refuses to send, because the submit branch, `mark_datao` numbering and
+  `qstJson` shape are not confirmed against a real homework task.
 
 ## Wrong-notes
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `wrong_notes_list` | `account_id, page, page_size, course_id?` | `WrongNotePage` |
-| `wrong_notes_preview` | `account_id, question_ids` | `CleanupPreview` |
-| `wrong_notes_cleanup` | `account_id, question_id` | `CleanupResult` |
+| `wrongnotes_subjects` | `account_id` | `WrongSubject[]` |
+| `wrongnotes_knowledge` | `account_id, filter{subject_id, book_id}` | `WrongKnowledge[]` |
+| `wrongnotes_pending` | `account_id, filter{subject_id, book_id, knowledge_id}` | `WrongNote[]` |
+| `wrongnotes_preview` | `account_id, question_ids` | `CleanupPreview` |
+| `wrongnotes_cleanup` | `confirm_token` | `CleanupRun` |
 
-`CleanupPreview.batch_mode` is `per_question` or `per_page`: the UI wording and
-progress model depend on which granularity the server actually accepts.
+`CleanupPreview.granularity_confirmed` decides what the run does. While it is
+`false`, `wrongnotes_cleanup` reports every question as `skipped` and sends
+nothing — the server's acceptance of one submission per question is unproven
+(`docs/protocol/to-probe.md` §6). Once confirmed, the run is serial, reports
+each question separately, and stops after three consecutive failures so a
+partial batch can be resumed rather than replayed.
 
 ## Settings
 
