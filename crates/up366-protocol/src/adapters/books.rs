@@ -125,8 +125,9 @@ mod tests {
                 .body_contains("bookId=BOOK-2")
                 .body_contains("bookType=1")
                 .body_contains("originalBookId=");
-            then.status(200)
-                .json_body(ok(json!({ "bookId": "BOOK-2", "bookName": "数学", "packType": 7 })));
+            then.status(200).json_body(ok(
+                json!({ "bookId": "BOOK-2", "bookName": "数学", "packType": 7 }),
+            ));
         });
 
         let client = client(&server);

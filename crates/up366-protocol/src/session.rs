@@ -100,10 +100,9 @@ mod tests {
 
     #[test]
     fn missing_optional_fields_use_defaults() {
-        let decoded: Session = serde_json::from_str(
-            r#"{"username":"alice","tgt":"TGT-1","client_id":"CID-1"}"#,
-        )
-        .unwrap();
+        let decoded: Session =
+            serde_json::from_str(r#"{"username":"alice","tgt":"TGT-1","client_id":"CID-1"}"#)
+                .unwrap();
         assert!(!decoded.is_expired());
         assert!(decoded.cookies.is_empty());
         assert!(decoded.has_credentials());

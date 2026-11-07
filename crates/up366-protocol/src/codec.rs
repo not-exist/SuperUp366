@@ -39,7 +39,11 @@ pub fn parse_envelope(payload: Value) -> Result<Option<Value>> {
 pub fn parse_envelope_with_codes(payload: Value, ok_codes: &[i64]) -> Result<Option<Value>> {
     let mut object = match payload {
         Value::Object(object) => object,
-        _ => return Err(ProtocolError::Decode("response is not a JSON object".into())),
+        _ => {
+            return Err(ProtocolError::Decode(
+                "response is not a JSON object".into(),
+            ))
+        }
     };
 
     let result = object
@@ -47,13 +51,16 @@ pub fn parse_envelope_with_codes(payload: Value, ok_codes: &[i64]) -> Result<Opt
         .ok_or_else(|| ProtocolError::Decode("response is missing result object".into()))?;
     let result = match result {
         Value::Object(result) => result,
-        _ => return Err(ProtocolError::Decode("response result is not an object".into())),
+        _ => {
+            return Err(ProtocolError::Decode(
+                "response result is not an object".into(),
+            ))
+        }
     };
 
-    let code = result
-        .get("code")
-        .and_then(as_i64)
-        .ok_or_else(|| ProtocolError::Decode("response result.code is missing or not an integer".into()))?;
+    let code = result.get("code").and_then(as_i64).ok_or_else(|| {
+        ProtocolError::Decode("response result.code is missing or not an integer".into())
+    })?;
     let message = result
         .get("msg")
         .and_then(Value::as_str)
@@ -230,9 +237,7 @@ mod tests {
     fn take_list_is_tolerant_of_missing_but_not_wrong_types() {
         let mut object = json!({ "ok": [], "bad": 3 }).as_object().cloned().unwrap();
         assert!(take_list(&mut object, "absent", "t").unwrap().is_empty());
-        assert!(
-            take_list(&mut object, "ok", "t").unwrap().is_empty()
-        );
+        assert!(take_list(&mut object, "ok", "t").unwrap().is_empty());
         assert!(matches!(
             take_list(&mut object, "bad", "t"),
             Err(ProtocolError::Decode(_))

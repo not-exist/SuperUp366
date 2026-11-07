@@ -44,7 +44,10 @@ impl ProtocolError {
                 -23 | -26 | -27 => DomainError::AuthFailed(message),
                 _ => DomainError::api(code, message),
             },
-            ProtocolError::Http { status: 401 | 403, body } => DomainError::AuthFailed(body),
+            ProtocolError::Http {
+                status: 401 | 403,
+                body,
+            } => DomainError::AuthFailed(body),
             ProtocolError::Http { status, body } => {
                 DomainError::Network(format!("HTTP {status}: {body}"))
             }
@@ -68,7 +71,13 @@ impl ProtocolError {
 
     /// Whether the business code signals a missing or rejected session.
     pub fn is_session_expired(&self) -> bool {
-        matches!(self, Self::Api { code: -21 | -22, .. })
+        matches!(
+            self,
+            Self::Api {
+                code: -21 | -22,
+                ..
+            }
+        )
     }
 }
 
@@ -97,21 +106,37 @@ mod tests {
     #[test]
     fn maps_business_codes_to_domain_errors() {
         assert!(matches!(
-            ProtocolError::Api { code: -13, message: String::new() }.into_domain(),
+            ProtocolError::Api {
+                code: -13,
+                message: String::new()
+            }
+            .into_domain(),
             DomainError::Duplicate
         ));
         for code in [-21, -22] {
             assert!(matches!(
-                ProtocolError::Api { code, message: String::new() }.into_domain(),
+                ProtocolError::Api {
+                    code,
+                    message: String::new()
+                }
+                .into_domain(),
                 DomainError::SessionExpired
             ));
         }
         assert!(matches!(
-            ProtocolError::Api { code: -27, message: "bad".into() }.into_domain(),
+            ProtocolError::Api {
+                code: -27,
+                message: "bad".into()
+            }
+            .into_domain(),
             DomainError::AuthFailed(_)
         ));
         assert!(matches!(
-            ProtocolError::Api { code: -4, message: "no auth".into() }.into_domain(),
+            ProtocolError::Api {
+                code: -4,
+                message: "no auth".into()
+            }
+            .into_domain(),
             DomainError::Api { code: -4, .. }
         ));
     }
@@ -119,10 +144,26 @@ mod tests {
     #[test]
     fn only_transient_failures_are_retryable() {
         assert!(ProtocolError::Transport("timeout".into()).is_retryable());
-        assert!(ProtocolError::Http { status: 503, body: String::new() }.is_retryable());
-        assert!(ProtocolError::Http { status: 429, body: String::new() }.is_retryable());
-        assert!(!ProtocolError::Http { status: 404, body: String::new() }.is_retryable());
-        assert!(!ProtocolError::Api { code: -13, message: String::new() }.is_retryable());
+        assert!(ProtocolError::Http {
+            status: 503,
+            body: String::new()
+        }
+        .is_retryable());
+        assert!(ProtocolError::Http {
+            status: 429,
+            body: String::new()
+        }
+        .is_retryable());
+        assert!(!ProtocolError::Http {
+            status: 404,
+            body: String::new()
+        }
+        .is_retryable());
+        assert!(!ProtocolError::Api {
+            code: -13,
+            message: String::new()
+        }
+        .is_retryable());
         assert!(!ProtocolError::Decode("bad".into()).is_retryable());
     }
 

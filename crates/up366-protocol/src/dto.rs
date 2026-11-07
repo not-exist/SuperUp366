@@ -242,7 +242,8 @@ impl Job {
             self.paper_id = ext_string(&self.ext_param, "paperId");
         }
         if self.task_id.is_none() {
-            self.task_id = ext_string(&self.ext_param, "taskId").or_else(|| self.content_id.clone());
+            self.task_id =
+                ext_string(&self.ext_param, "taskId").or_else(|| self.content_id.clone());
         }
         if self.task_status.is_none() {
             self.task_status = ext_i64(&self.ext_param, "taskStatus");
@@ -263,7 +264,10 @@ impl Job {
     }
 
     pub fn title(&self) -> &str {
-        self.job_name.as_deref().or(self.name.as_deref()).unwrap_or("")
+        self.job_name
+            .as_deref()
+            .or(self.name.as_deref())
+            .unwrap_or("")
     }
 
     pub fn course(&self) -> Option<&str> {
@@ -506,7 +510,10 @@ impl Book {
     }
 
     pub fn title(&self) -> &str {
-        self.book_name.as_deref().or(self.name.as_deref()).unwrap_or("")
+        self.book_name
+            .as_deref()
+            .or(self.name.as_deref())
+            .unwrap_or("")
     }
 
     pub fn cover(&self) -> Option<&str> {
@@ -615,9 +622,7 @@ impl BookTree {
             .as_ref()
             .and_then(|book| book.get("configs"))
             .and_then(|configs| configs.get("customFlag"))
-            .is_some_and(|flag| {
-                flag.as_i64() == Some(1) || flag.as_str() == Some("1")
-            })
+            .is_some_and(|flag| flag.as_i64() == Some(1) || flag.as_str() == Some("1"))
     }
 }
 
@@ -726,7 +731,11 @@ impl AnswerDetail {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaperDetail {
-    #[serde(default, rename = "paperData", deserialize_with = "flex::string_or_empty")]
+    #[serde(
+        default,
+        rename = "paperData",
+        deserialize_with = "flex::string_or_empty"
+    )]
     pub paper_data: String,
     #[serde(default)]
     pub raw: Value,
@@ -900,8 +909,18 @@ fn nested_f64(value: &Option<Value>, key: &str) -> Option<f64> {
 }
 
 impl_raw!(
-    Course, Job, JobInfo, FinishedJob, FinishedTask, Book, BookChapter, BookTree,
-    BookPlanEntry, AnswerDetail, PaperDetail, Word,
+    Course,
+    Job,
+    JobInfo,
+    FinishedJob,
+    FinishedTask,
+    Book,
+    BookChapter,
+    BookTree,
+    BookPlanEntry,
+    AnswerDetail,
+    PaperDetail,
+    Word,
 );
 
 #[cfg(test)]
@@ -958,7 +977,10 @@ mod tests {
 
         assert_eq!(word.entry_id.as_deref(), Some("7"));
         assert_eq!(word.cn(), "n.苹果");
-        assert_eq!(word.audio_url(), "https://word-cdn-alyun.up366.cn/apple_us.mp3");
+        assert_eq!(
+            word.audio_url(),
+            "https://word-cdn-alyun.up366.cn/apple_us.mp3"
+        );
     }
 
     #[test]

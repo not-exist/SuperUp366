@@ -10,10 +10,7 @@ use crate::error::{ProtocolError, Result};
 
 /// Prefer the v2 answer-detail endpoint, falling back to v1 when the route or
 /// parameter shape is not available.
-pub async fn answer_detail(
-    client: &Client,
-    params: &AnswerDetailParams,
-) -> Result<AnswerDetail> {
+pub async fn answer_detail(client: &Client, params: &AnswerDetailParams) -> Result<AnswerDetail> {
     match answer_detail_v2(client, params).await {
         Ok(value) => Ok(value),
         Err(error) if should_fallback_to_v1(&error) => answer_detail_v1(client, params).await,
@@ -74,8 +71,10 @@ pub async fn paper_detail(client: &Client, paper_id: &str) -> Result<PaperDetail
 fn should_fallback_to_v1(error: &ProtocolError) -> bool {
     matches!(
         error,
-        ProtocolError::Http { status: 404 | 405, .. }
-            | ProtocolError::Api { code: -1, .. }
+        ProtocolError::Http {
+            status: 404 | 405,
+            ..
+        } | ProtocolError::Api { code: -1, .. }
     )
 }
 
@@ -118,7 +117,8 @@ mod tests {
     async fn v2_param_error_falls_back_to_v1_get() {
         let server = MockServer::start();
         let v2 = server.mock(|when, then| {
-            when.method(POST).path("/client/student/task/answer/detail/v2");
+            when.method(POST)
+                .path("/client/student/task/answer/detail/v2");
             then.status(200).json_body(json!({
                 "result": { "code": -1, "msg": "param_missing" }
             }));
@@ -149,12 +149,14 @@ mod tests {
     async fn v2_404_falls_back_to_v1() {
         let server = MockServer::start();
         let v2 = server.mock(|when, then| {
-            when.method(POST).path("/client/student/task/answer/detail/v2");
+            when.method(POST)
+                .path("/client/student/task/answer/detail/v2");
             then.status(404).body("not found");
         });
         let v1 = server.mock(|when, then| {
             when.method(GET).path("/client/student/task/answer/detail");
-            then.status(200).json_body(ok(json!({ "paperInfo": {}, "userAnswer": {} })));
+            then.status(200)
+                .json_body(ok(json!({ "paperInfo": {}, "userAnswer": {} })));
         });
 
         let client = client(&server);
@@ -167,12 +169,14 @@ mod tests {
     async fn v2_405_falls_back_to_v1() {
         let server = MockServer::start();
         let v2 = server.mock(|when, then| {
-            when.method(POST).path("/client/student/task/answer/detail/v2");
+            when.method(POST)
+                .path("/client/student/task/answer/detail/v2");
             then.status(405).body("method not allowed");
         });
         let v1 = server.mock(|when, then| {
             when.method(GET).path("/client/student/task/answer/detail");
-            then.status(200).json_body(ok(json!({ "paperInfo": {}, "userAnswer": {} })));
+            then.status(200)
+                .json_body(ok(json!({ "paperInfo": {}, "userAnswer": {} })));
         });
 
         let client = client(&server);
@@ -203,7 +207,8 @@ mod tests {
     async fn v2_auth_error_does_not_fallback() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
-            when.method(POST).path("/client/student/task/answer/detail/v2");
+            when.method(POST)
+                .path("/client/student/task/answer/detail/v2");
             then.status(200)
                 .json_body(json!({ "result": { "code": -21, "msg": "no login" } }));
         });

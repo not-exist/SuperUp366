@@ -147,9 +147,7 @@ impl ClientBuilder {
             cookies: jar,
             state: Arc::new(RwLock::new(state)),
             client_id,
-            clock: self
-                .clock
-                .unwrap_or_else(|| Arc::new(system_now_ms)),
+            clock: self.clock.unwrap_or_else(|| Arc::new(system_now_ms)),
             base_override: self.base_override.map(Arc::from),
             retry_base_delay: self.retry_base_delay.unwrap_or(DEFAULT_RETRY_BASE),
             max_read_retries: self.max_read_retries.unwrap_or(MAX_READ_RETRIES),
@@ -282,7 +280,8 @@ impl Client {
         endpoint: &Endpoint,
         fields: &[(&str, Value)],
     ) -> Result<Option<Value>> {
-        self.execute(endpoint, fields, &[codec::OK_CODE], false).await
+        self.execute(endpoint, fields, &[codec::OK_CODE], false)
+            .await
     }
 
     /// Execute with custom accepted business codes. Used by login (`-26`) and
@@ -347,9 +346,7 @@ impl Client {
 
         match codec::parse_envelope_with_codes(payload, ok_codes) {
             Ok(data) => Ok(data),
-            Err(ProtocolError::Api { code, .. })
-                if allow_ticket && matches!(code, -21 | -22) =>
-            {
+            Err(ProtocolError::Api { code, .. }) if allow_ticket && matches!(code, -21 | -22) => {
                 let ticket = match self.service_ticket(url).await {
                     Ok(ticket) => ticket,
                     Err(error) => {
@@ -358,7 +355,10 @@ impl Client {
                     }
                 };
                 let replay_url = append_query(url, &[("ticket", Value::String(ticket))])?;
-                let result = match self.send_raw(endpoint, &replay_url, fields, anonymous).await {
+                let result = match self
+                    .send_raw(endpoint, &replay_url, fields, anonymous)
+                    .await
+                {
                     Ok(payload) => codec::parse_envelope_with_codes(payload, ok_codes),
                     Err(error) => Err(error),
                 };
@@ -400,18 +400,14 @@ impl Client {
         }
 
         serde_json::from_str(&body).map_err(|error| {
-            ProtocolError::Decode(format!(
-                "{}: invalid JSON response: {error}",
-                endpoint.name
-            ))
+            ProtocolError::Decode(format!("{}: invalid JSON response: {error}", endpoint.name))
         })
     }
 
     /// Exchange the TGT for a one-time ticket for `service`.
     async fn service_ticket(&self, service: &str) -> Result<String> {
-        let endpoint = get("service_ticket").ok_or_else(|| {
-            ProtocolError::Decode("missing endpoint: service_ticket".into())
-        })?;
+        let endpoint = get("service_ticket")
+            .ok_or_else(|| ProtocolError::Decode("missing endpoint: service_ticket".into()))?;
         let url = self.endpoint_url(endpoint);
         let payload = self
             .send_raw(
@@ -433,8 +429,8 @@ impl Client {
     }
 
     fn mark_expired_if_needed(&self, error: &ProtocolError) {
-        let expired = error.is_session_expired()
-            || matches!(error, ProtocolError::Api { code: -23, .. });
+        let expired =
+            error.is_session_expired() || matches!(error, ProtocolError::Api { code: -23, .. });
         if expired {
             self.mark_expired();
         }
@@ -569,10 +565,7 @@ impl CookieJar {
         let cookies = self.lock();
         let mut exported: Vec<(String, String)> = Vec::new();
         for cookie in cookies.iter() {
-            if let Some(existing) = exported
-                .iter_mut()
-                .find(|(name, _)| name == &cookie.name)
-            {
+            if let Some(existing) = exported.iter_mut().find(|(name, _)| name == &cookie.name) {
                 existing.1.clone_from(&cookie.value);
             } else {
                 exported.push((cookie.name.clone(), cookie.value.clone()));
@@ -630,11 +623,7 @@ impl CookieJar {
 }
 
 impl CookieStore for CookieJar {
-    fn set_cookies(
-        &self,
-        cookie_headers: &mut dyn Iterator<Item = &HeaderValue>,
-        url: &Url,
-    ) {
+    fn set_cookies(&self, cookie_headers: &mut dyn Iterator<Item = &HeaderValue>, url: &Url) {
         for header in cookie_headers {
             if let Ok(raw) = header.to_str() {
                 if let Some(cookie) = parse_set_cookie(raw, url) {
@@ -807,7 +796,9 @@ mod tests {
         assert_eq!(headers[AUTHORIZATION], "");
         let u3r = headers["u3r"].to_str().unwrap();
         assert_eq!(u3r.len(), 32);
-        assert!(u3r.chars().all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase()));
+        assert!(u3r
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase()));
 
         let anonymous = client.headers(true).unwrap();
         assert_eq!(anonymous["u3t"], "");
@@ -898,10 +889,7 @@ mod tests {
         });
         let client = client(&server);
 
-        let error = client
-            .call(get("courses").unwrap(), &[])
-            .await
-            .unwrap_err();
+        let error = client.call(get("courses").unwrap(), &[]).await.unwrap_err();
 
         assert!(matches!(error, ProtocolError::Http { status: 503, .. }));
         mock.assert_hits(3);
@@ -934,10 +922,7 @@ mod tests {
         });
         let client = client(&server);
 
-        let error = client
-            .call(get("courses").unwrap(), &[])
-            .await
-            .unwrap_err();
+        let error = client.call(get("courses").unwrap(), &[]).await.unwrap_err();
 
         match error {
             ProtocolError::Http { status, body } => {
@@ -958,10 +943,7 @@ mod tests {
         });
         let client = client(&server);
 
-        let error = client
-            .call(get("courses").unwrap(), &[])
-            .await
-            .unwrap_err();
+        let error = client.call(get("courses").unwrap(), &[]).await.unwrap_err();
         assert!(matches!(error, ProtocolError::Decode(_)));
     }
 
@@ -982,7 +964,11 @@ mod tests {
 
         assert!(matches!(error, ProtocolError::Api { code: -13, .. }));
         assert!(matches!(
-            ProtocolError::Api { code: -13, message: String::new() }.into_domain(),
+            ProtocolError::Api {
+                code: -13,
+                message: String::new()
+            }
+            .into_domain(),
             up366_core::DomainError::Duplicate
         ));
         mock.assert_hits(1);
@@ -1020,10 +1006,7 @@ mod tests {
         });
 
         let client = client(&server);
-        let data = client
-            .call(get("courses").unwrap(), &[])
-            .await
-            .unwrap();
+        let data = client.call(get("courses").unwrap(), &[]).await.unwrap();
 
         assert_eq!(data, Some(json!({ "list": [] })));
         first.assert_hits(1);
@@ -1092,10 +1075,7 @@ mod tests {
         });
 
         let client = client(&server);
-        let error = client
-            .call(get("courses").unwrap(), &[])
-            .await
-            .unwrap_err();
+        let error = client.call(get("courses").unwrap(), &[]).await.unwrap_err();
 
         assert!(matches!(error, ProtocolError::Api { code: -21, .. }));
         first.assert_hits(1);

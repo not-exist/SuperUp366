@@ -16,6 +16,10 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+chrono.workspace = true
+dirs = "6"
+parking_lot = "0.12"
+regex = "1"
 serde.workspace = true
 serde_json.workspace = true
 up366-core.workspace = true
@@ -23,3 +27,9 @@ up366-protocol.workspace = true
 up366-store.workspace = true
 up366-media.workspace = true
 up366-sync.workspace = true
+
+[dev-dependencies]
+futures = "0.3"
+serial_test = "3"
+tokio.workspace = true
+tempfile.workspace = true

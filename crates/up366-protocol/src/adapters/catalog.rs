@@ -14,10 +14,7 @@ pub async fn courses(client: &Client) -> Result<Vec<Course>> {
     let data = client
         .call(
             endpoint,
-            &[
-                ("status", json!(1)),
-                ("pager###pageSize", json!(999)),
-            ],
+            &[("status", json!(1)), ("pager###pageSize", json!(999))],
         )
         .await?;
     let mut object = codec::into_object(data, endpoint.name)?;
@@ -76,10 +73,7 @@ pub async fn job_info(
 /// wrapper is not documented with the same confidence as the others. Both an
 /// array and the common `allTaskList` / `finishedJobList` / `list` wrappers
 /// are accepted; anything else is a decode error.
-pub async fn course_finished_jobs(
-    client: &Client,
-    course_id: &str,
-) -> Result<Vec<FinishedJob>> {
+pub async fn course_finished_jobs(client: &Client, course_id: &str) -> Result<Vec<FinishedJob>> {
     let endpoint = endpoint("course_finished_jobs")?;
     let data = client
         .call(endpoint, &[("courseId", json!(course_id))])
@@ -92,19 +86,12 @@ pub async fn course_finished_jobs(
             let mut found = None;
             for key in ["allTaskList", "finishedJobList", "list"] {
                 if object.contains_key(key) {
-                    found = Some(codec::take_list(
-                        &mut object,
-                        key,
-                        endpoint.name,
-                    )?);
+                    found = Some(codec::take_list(&mut object, key, endpoint.name)?);
                     break;
                 }
             }
             found.ok_or_else(|| {
-                ProtocolError::Decode(format!(
-                    "{}: data has no finished-job list",
-                    endpoint.name
-                ))
+                ProtocolError::Decode(format!("{}: data has no finished-job list", endpoint.name))
             })?
         }
         Some(_) => {
@@ -123,9 +110,7 @@ pub async fn course_finished_jobs(
 /// to an empty list.
 pub async fn finished_tasks(client: &Client, book_id: &str) -> Result<Vec<FinishedTask>> {
     let endpoint = endpoint("finished_tasks")?;
-    let data = client
-        .call(endpoint, &[("bookId", json!(book_id))])
-        .await?;
+    let data = client.call(endpoint, &[("bookId", json!(book_id))]).await?;
     let items = if data.is_none() {
         Vec::new()
     } else {
@@ -287,7 +272,10 @@ mod tests {
         assert_eq!(tasks[0].score, Some(8.0));
         assert_eq!(tasks[0].max_score, Some(10.0));
         assert_eq!(tasks[0].percent, Some(0.8));
-        assert!(finished_tasks(&client, "BOOK-EMPTY").await.unwrap().is_empty());
+        assert!(finished_tasks(&client, "BOOK-EMPTY")
+            .await
+            .unwrap()
+            .is_empty());
 
         mock.assert_hits(1);
         empty.assert_hits(1);

@@ -61,8 +61,8 @@ pub async fn login_with_salt(
     password: &str,
     salt: PasswordSalt,
 ) -> Result<Session> {
-    let endpoint = get("login")
-        .ok_or_else(|| ProtocolError::Decode("missing endpoint: login".into()))?;
+    let endpoint =
+        get("login").ok_or_else(|| ProtocolError::Decode("missing endpoint: login".into()))?;
 
     let password_hash = salt.hash(password);
     let signature = login_ut(username, &password_hash, client.now_ms());
@@ -81,9 +81,7 @@ pub async fn login_with_salt(
     let object = codec::into_object(data, "login").map_err(auth_error)?;
     let tgt = codec::string_field(&object, "tgt")
         .filter(|tgt| !tgt.is_empty())
-        .ok_or_else(|| {
-            ProtocolError::Auth("login response did not contain data.tgt".into())
-        })?;
+        .ok_or_else(|| ProtocolError::Auth("login response did not contain data.tgt".into()))?;
     let user_type = object.get("uType").and_then(codec_i64);
 
     let session = Session {
@@ -143,9 +141,7 @@ mod tests {
         let server = MockServer::start();
         let password_hash = login_password_hash("secret", PASSWORD_SALT_AT);
         let signature = login_ut("alice", &password_hash, CLOCK);
-        let expected = format!(
-            "username=alice&password={password_hash}&ut={signature}"
-        );
+        let expected = format!("username=alice&password={password_hash}&ut={signature}");
 
         let mock = server.mock(|when, then| {
             when.method(POST)
