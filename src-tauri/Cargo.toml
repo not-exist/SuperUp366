@@ -22,6 +22,7 @@ parking_lot = "0.12"
 regex = "1"
 serde.workspace = true
 serde_json.workspace = true
+uuid.workspace = true
 up366-core.workspace = true
 up366-protocol.workspace = true
 up366-store.workspace = true

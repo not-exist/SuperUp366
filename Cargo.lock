@@ -5611,6 +5611,7 @@ dependencies = [
  "up366-protocol",
  "up366-store",
  "up366-sync",
+ "uuid",
 ]
 
 [[package]]

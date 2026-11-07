@@ -4,10 +4,12 @@
 //! Business logic lives in the `up366-*` crates.
 
 mod commands;
+mod confirm;
 mod error;
 mod session;
 mod state;
 
+pub use confirm::{Confirmations, PendingWrite, CONFIRM_TTL};
 pub use error::AppError;
 pub use session::AppState;
 pub use state::{BookView, CourseView, JobView, StatusView};
