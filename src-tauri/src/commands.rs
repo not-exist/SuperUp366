@@ -14,3 +14,4 @@ pub mod homework;
 pub mod readaloud;
 pub mod system;
 pub mod wordpk;
+pub mod wrongnotes;

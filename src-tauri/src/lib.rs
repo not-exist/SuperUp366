@@ -40,6 +40,11 @@ pub fn app(state: AppState) -> tauri::Builder<tauri::Wry> {
             commands::readaloud::readaloud_get,
             commands::readaloud::readaloud_upload,
             commands::readaloud::readaloud_submit,
+            commands::wrongnotes::wrongnotes_subjects,
+            commands::wrongnotes::wrongnotes_knowledge,
+            commands::wrongnotes::wrongnotes_pending,
+            commands::wrongnotes::wrongnotes_preview,
+            commands::wrongnotes::wrongnotes_cleanup,
         ])
 }
 
