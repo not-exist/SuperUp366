@@ -8,6 +8,7 @@
 //! success the server did not confirm.
 
 pub mod accounts;
+pub mod books;
 pub mod catalog;
 pub mod homework;
 pub mod system;

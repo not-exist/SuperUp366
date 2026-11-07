@@ -55,10 +55,11 @@ struct JobIds {
 /// endpoint wants.
 #[tauri::command]
 pub async fn answer_get(
+    account_id: String,
     job_id: String,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<AnswerDocumentView> {
-    let (account_id, client) = state.require_client()?;
+    let (account_id, client) = state.require_client(Some(&account_id))?;
     let account = load_account(&state, &account_id).await?;
     let ids = find_job_ids(&state, &account_id, &job_id).await?;
 

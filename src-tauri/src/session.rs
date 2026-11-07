@@ -77,10 +77,25 @@ impl AppState {
     }
 
     /// The active account and its client, or an auth error when none is active.
-    pub fn require_client(&self) -> crate::error::CommandResult<(AccountId, Client)> {
+    ///
+    /// `requested` is the account the caller says it is acting for. It must
+    /// match the active account: the alternative is a stale frontend query
+    /// silently reading another account's data.
+    pub fn require_client(
+        &self,
+        requested: Option<&str>,
+    ) -> crate::error::CommandResult<(AccountId, Client)> {
         let account_id = self
             .active_id()
             .ok_or_else(crate::error::AppError::auth_required)?;
+        if let Some(requested) = requested {
+            if *account_id.as_str() != *requested {
+                return Err(crate::error::AppError::new(
+                    "account_mismatch",
+                    "请求的账号不是当前账号",
+                ));
+            }
+        }
         let client = self
             .runtimes
             .read()
@@ -153,7 +168,7 @@ mod tests {
         let state = state().await;
         // `err()` rather than `unwrap_err()`: the ok side holds a `Client`,
         // which is deliberately not `Debug`.
-        let code = state.require_client().err().map(|error| error.code);
+        let code = state.require_client(None).err().map(|error| error.code);
         assert_eq!(code, Some("session_expired"));
         assert!(state.active_id().is_none());
     }
@@ -171,7 +186,7 @@ mod tests {
         state.install(account.clone(), client, session.clone());
 
         assert_eq!(state.active_id(), Some(account.clone()));
-        let (id, _) = state.require_client().unwrap();
+        let (id, _) = state.require_client(None).unwrap();
         assert_eq!(id, account);
 
         state.save_session(&account, &session).unwrap();
@@ -194,7 +209,7 @@ mod tests {
         state.forget(&account).await.unwrap();
 
         assert_eq!(state.active_id(), None);
-        let code = state.require_client().err().map(|error| error.code);
+        let code = state.require_client(None).err().map(|error| error.code);
         assert_eq!(code, Some("session_expired"));
         assert!(state.secrets.load(&account).unwrap().is_none());
     }
@@ -214,7 +229,7 @@ mod tests {
             Session::new("b", "TGT-B", "CID-B"),
         );
 
-        let (active, client) = state.require_client().unwrap();
+        let (active, client) = state.require_client(None).unwrap();
         assert_eq!(active, second);
         assert_eq!(client.client_id(), "CID-B");
     }

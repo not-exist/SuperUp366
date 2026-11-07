@@ -25,8 +25,11 @@ pub struct JobFilter {
 
 /// The full course list, with the class label already split out.
 #[tauri::command]
-pub async fn courses_list(state: tauri::State<'_, AppState>) -> CommandResult<Vec<CourseView>> {
-    let (_, client) = state.require_client()?;
+pub async fn courses_list(
+    account_id: String,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<Vec<CourseView>> {
+    let (_, client) = state.require_client(Some(&account_id))?;
     let courses = adapters::courses(&client).await.map_err(AppError::from)?;
     Ok(courses
         .iter()
@@ -42,10 +45,13 @@ pub async fn courses_list(state: tauri::State<'_, AppState>) -> CommandResult<Ve
 /// re-sorted. A job that appears in two classes stays two rows.
 #[tauri::command]
 pub async fn jobs_list(
+    account_id: String,
+    refresh: Option<bool>,
     filter: Option<JobFilter>,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<Vec<JobView>> {
-    let (_, client) = state.require_client()?;
+    let (_, client) = state.require_client(Some(&account_id))?;
+    let _ = refresh;
     let courses = adapters::courses(&client).await.map_err(AppError::from)?;
 
     let mut rows: Vec<JobView> = Vec::new();

@@ -25,6 +25,8 @@ pub fn app(state: AppState) -> tauri::Builder<tauri::Wry> {
             commands::accounts::account_login,
             commands::accounts::account_switch,
             commands::accounts::account_logout,
+            commands::books::books_list,
+            commands::books::book_detail,
             commands::catalog::courses_list,
             commands::catalog::jobs_list,
             commands::homework::answer_get,
