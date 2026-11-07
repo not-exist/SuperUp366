@@ -68,12 +68,11 @@ mod tests {
 
     #[test]
     fn null_values_are_dropped_and_ordering_preserved() {
-        let pairs = encode_form([
-            ("a", json!("1")),
-            ("b", Value::Null),
-            ("c", json!(3)),
-        ]);
-        assert_eq!(pairs, vec![("a".into(), "1".into()), ("c".into(), "3".into())]);
+        let pairs = encode_form([("a", json!("1")), ("b", Value::Null), ("c", json!(3))]);
+        assert_eq!(
+            pairs,
+            vec![("a".into(), "1".into()), ("c".into(), "3".into())]
+        );
     }
 
     #[test]

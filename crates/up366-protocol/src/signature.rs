@@ -46,9 +46,7 @@ pub fn login_password_hash(password: &str, salt: &str) -> String {
 /// Login signature for a given millisecond timestamp.
 pub fn login_ut(username: &str, password_hash: &str, timestamp_ms: u128) -> String {
     let ts = md5_text(&timestamp_ms.to_string());
-    let middle = md5_text(&format!(
-        "{username}{password_hash}{LOGIN_UT_KEYWORD}{ts}"
-    ));
+    let middle = md5_text(&format!("{username}{password_hash}{LOGIN_UT_KEYWORD}{ts}"));
     format!("{}{middle}{}", &ts[..10], &ts[10..])
 }
 
@@ -104,10 +102,7 @@ mod tests {
 
     #[test]
     fn ut_is_deterministic() {
-        assert_eq!(
-            login_ut("alice", "hash", 42),
-            login_ut("alice", "hash", 42)
-        );
+        assert_eq!(login_ut("alice", "hash", 42), login_ut("alice", "hash", 42));
     }
 
     #[test]

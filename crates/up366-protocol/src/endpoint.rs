@@ -47,7 +47,13 @@ const fn ep(
     write: bool,
     body: BodyKind,
 ) -> Endpoint {
-    Endpoint { name, base_url, path, write, body }
+    Endpoint {
+        name,
+        base_url,
+        path,
+        write,
+        body,
+    }
 }
 
 const SSO: &str = "https://sso.up366.cn";
@@ -70,12 +76,42 @@ const WRONGNOTE_API: &str = "https://wrongnote-api.up366.cn";
 pub const ENDPOINTS: &[Endpoint] = &[
     // --- auth ---------------------------------------------------------
     ep("login", SSO, "/v2/tickets-v3", true, BodyKind::Form),
-    ep("service_ticket", SSO, "/v1/serviceTicket", false, BodyKind::Form),
-    ep("current_user", USER_API, "/client/user/currentuser", false, BodyKind::None),
+    ep(
+        "service_ticket",
+        SSO,
+        "/v1/serviceTicket",
+        false,
+        BodyKind::Form,
+    ),
+    ep(
+        "current_user",
+        USER_API,
+        "/client/user/currentuser",
+        false,
+        BodyKind::None,
+    ),
     // --- catalog ------------------------------------------------------
-    ep("courses", COURSE_API, "/client/course/list-of-student/v2", false, BodyKind::Form),
-    ep("jobs", STUDYTASK_API, "/client/student/course/job", false, BodyKind::Form),
-    ep("job_info", STUDYTASK_API, "/client/student/job/info", false, BodyKind::Form),
+    ep(
+        "courses",
+        COURSE_API,
+        "/client/course/list-of-student/v2",
+        false,
+        BodyKind::Form,
+    ),
+    ep(
+        "jobs",
+        STUDYTASK_API,
+        "/client/student/course/job",
+        false,
+        BodyKind::Form,
+    ),
+    ep(
+        "job_info",
+        STUDYTASK_API,
+        "/client/student/job/info",
+        false,
+        BodyKind::Form,
+    ),
     ep(
         "course_finished_jobs",
         STUDYTASK_API,
@@ -83,12 +119,42 @@ pub const ENDPOINTS: &[Endpoint] = &[
         false,
         BodyKind::Form,
     ),
-    ep("finished_tasks", DSB_API, "/client/book/finished-task/list", false, BodyKind::Form),
+    ep(
+        "finished_tasks",
+        DSB_API,
+        "/client/book/finished-task/list",
+        false,
+        BodyKind::Form,
+    ),
     // --- books --------------------------------------------------------
-    ep("books", BOOK_API, "/client/books/buy-book", false, BodyKind::None),
-    ep("book_info", BOOK_API, "/client/v2/book/info", false, BodyKind::Form),
-    ep("book_tree", BOOK_API, "/client/books/tree", false, BodyKind::Form),
-    ep("book_plan", STUDYTASK_API, "/client/book/plan", false, BodyKind::Form),
+    ep(
+        "books",
+        BOOK_API,
+        "/client/books/buy-book",
+        false,
+        BodyKind::None,
+    ),
+    ep(
+        "book_info",
+        BOOK_API,
+        "/client/v2/book/info",
+        false,
+        BodyKind::Form,
+    ),
+    ep(
+        "book_tree",
+        BOOK_API,
+        "/client/books/tree",
+        false,
+        BodyKind::Form,
+    ),
+    ep(
+        "book_plan",
+        STUDYTASK_API,
+        "/client/book/plan",
+        false,
+        BodyKind::Form,
+    ),
     // --- answers / papers --------------------------------------------
     ep(
         "answer_detail_v2",
@@ -104,7 +170,13 @@ pub const ENDPOINTS: &[Endpoint] = &[
         false,
         BodyKind::Query,
     ),
-    ep("paper_detail", QLIB_API, "/client/paper/detail", false, BodyKind::Query),
+    ep(
+        "paper_detail",
+        QLIB_API,
+        "/client/paper/detail",
+        false,
+        BodyKind::Query,
+    ),
     // --- word pk ------------------------------------------------------
     ep(
         "bucket_words",
@@ -115,11 +187,35 @@ pub const ENDPOINTS: &[Endpoint] = &[
     ),
     // Method is disputed between the archive (GET) and the old client
     // (POST with GET fallback). Kept as POST here; the probe step resolves it.
-    ep("word_pk_submit", WORDSBTL_API, "/client/wordsbtl/student/submit", true, BodyKind::Form),
+    ep(
+        "word_pk_submit",
+        WORDSBTL_API,
+        "/client/wordsbtl/student/submit",
+        true,
+        BodyKind::Form,
+    ),
     // --- scoring / media ---------------------------------------------
-    ep("task_score_submit", STUDY_API, "/client/task/score/submit/v2", true, BodyKind::Form),
-    ep("aliyun_oss_token", SETUP_API, "/front/aliyunoss/token/v2", false, BodyKind::Query),
-    ep("current_time", SETUP_API, "/front/current-time", false, BodyKind::Form),
+    ep(
+        "task_score_submit",
+        STUDY_API,
+        "/client/task/score/submit/v2",
+        true,
+        BodyKind::Form,
+    ),
+    ep(
+        "aliyun_oss_token",
+        SETUP_API,
+        "/front/aliyunoss/token/v2",
+        false,
+        BodyKind::Query,
+    ),
+    ep(
+        "current_time",
+        SETUP_API,
+        "/front/current-time",
+        false,
+        BodyKind::Form,
+    ),
     // --- wrong-answer book -------------------------------------------
     ep(
         "wrong_subjects",
@@ -201,7 +297,11 @@ mod tests {
     fn every_path_starts_with_slash_and_host_is_https() {
         for e in ENDPOINTS {
             assert!(e.path.starts_with('/'), "bad path for {}", e.name);
-            assert!(e.base_url.starts_with("https://"), "bad host for {}", e.name);
+            assert!(
+                e.base_url.starts_with("https://"),
+                "bad host for {}",
+                e.name
+            );
             assert!(!e.base_url.ends_with('/'), "trailing slash for {}", e.name);
         }
     }
@@ -217,10 +317,19 @@ mod tests {
 
     #[test]
     fn only_expected_endpoints_are_writes() {
-        let writes: Vec<_> = ENDPOINTS.iter().filter(|e| e.write).map(|e| e.name).collect();
+        let writes: Vec<_> = ENDPOINTS
+            .iter()
+            .filter(|e| e.write)
+            .map(|e| e.name)
+            .collect();
         assert_eq!(
             writes,
-            vec!["login", "word_pk_submit", "task_score_submit", "submit_wrong_question"]
+            vec![
+                "login",
+                "word_pk_submit",
+                "task_score_submit",
+                "submit_wrong_question"
+            ]
         );
     }
 }
