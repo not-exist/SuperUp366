@@ -1,4 +1,8 @@
 // One function per Tauri command. Pages never build argument objects by hand.
+//
+// Names must match the Rust `generate_handler!` list in `src-tauri/src/lib.rs`
+// exactly, including argument keys, because Tauri matches arguments by name and
+// silently drops anything unexpected.
 
 import { invokeCommand } from "./invoke";
 import type { Settings, WordPkAnswer } from "./types";
@@ -26,59 +30,56 @@ export const api = {
     invokeCommand("answer_get", { account_id: accountId, job_id: jobId }),
 
   getWordPk: (accountId: string, jobId: string) =>
-    invokeCommand("word_pk_preview", { account_id: accountId, job_id: jobId }),
-  submitWordPk: (accountId: string, jobId: string, answers: WordPkAnswer[]) =>
-    invokeCommand("word_pk_submit", {
-      account_id: accountId,
-      job_id: jobId,
-      answers,
-    }),
+    invokeCommand("wordpk_preview", { account_id: accountId, job_id: jobId }),
+  submitWordPk: (confirmToken: string, answers: WordPkAnswer[]) =>
+    invokeCommand("wordpk_submit", { confirm_token: confirmToken, answers }),
 
   getReadAloud: (accountId: string, jobId: string) =>
-    invokeCommand("read_aloud_get", { account_id: accountId, job_id: jobId }),
+    invokeCommand("readaloud_get", { account_id: accountId, job_id: jobId }),
   uploadRecording: (
     accountId: string,
     jobId: string,
     questionId: string,
+    path: string,
     fileName: string,
-    dataBase64: string,
   ) =>
-    invokeCommand("read_aloud_upload", {
+    invokeCommand("readaloud_upload", {
       account_id: accountId,
       job_id: jobId,
-      question_id: questionId,
-      file_name: fileName,
-      data_base64: dataBase64,
+      recording: { question_id: questionId, path, file_name: fileName },
     }),
   submitReadAloud: (accountId: string, jobId: string, dryRun: boolean) =>
-    invokeCommand("read_aloud_submit", {
+    invokeCommand("readaloud_submit", {
       account_id: accountId,
       job_id: jobId,
       dry_run: dryRun,
     }),
 
-  listWrongNotes: (
-    accountId: string,
-    page: number,
-    pageSize: number,
-    courseId?: string,
-  ) =>
-    invokeCommand("wrong_notes_list", {
+  listWrongSubjects: (accountId: string) =>
+    invokeCommand("wrongnotes_subjects", { account_id: accountId }),
+  listWrongKnowledge: (accountId: string, subjectId: string, bookId?: string) =>
+    invokeCommand("wrongnotes_knowledge", {
       account_id: accountId,
-      page,
-      page_size: pageSize,
-      course_id: courseId,
+      filter: { subject_id: subjectId, book_id: bookId },
+    }),
+  listWrongPending: (
+    accountId: string,
+    subjectId: string,
+    bookId: string,
+    knowledgeId: string,
+  ) =>
+    invokeCommand("wrongnotes_pending", {
+      account_id: accountId,
+      filter: {
+        subject_id: subjectId,
+        book_id: bookId,
+        knowledge_id: knowledgeId,
+      },
     }),
   previewWrongNoteCleanup: (accountId: string, questionIds: string[]) =>
-    invokeCommand("wrong_notes_preview", {
-      account_id: accountId,
-      question_ids: questionIds,
-    }),
-  cleanupWrongNote: (accountId: string, questionId: string) =>
-    invokeCommand("wrong_notes_cleanup", {
-      account_id: accountId,
-      question_id: questionId,
-    }),
+    invokeCommand("wrongnotes_preview", { account_id: accountId, question_ids: questionIds }),
+  cleanupWrongNotes: (confirmToken: string) =>
+    invokeCommand("wrongnotes_cleanup", { confirm_token: confirmToken }),
 
   getSettings: () => invokeCommand("settings_get", {}),
   updateSettings: (settings: Settings) =>

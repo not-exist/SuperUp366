@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api/commands";
-import type { SubmitResult } from "../api/types";
+import type { WordPkResult } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorState } from "../components/ErrorState";
@@ -16,7 +16,7 @@ export function WordPk() {
   const account = useAccount();
   const [known, setKnown] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [result, setResult] = useState<SubmitResult | null>(null);
+  const [result, setResult] = useState<WordPkResult | null>(null);
 
   const preview = useQuery({
     queryKey: ["word-pk", account.account_id, jobId],
@@ -25,15 +25,21 @@ export function WordPk() {
   });
 
   const submit = useMutation({
-    mutationFn: () =>
-      api.submitWordPk(
-        account.account_id,
-        jobId ?? "",
+    mutationFn: () => {
+      // The token comes from the preview that was shown to the user; without
+      // it the backend refuses, so a double click cannot submit twice.
+      const confirmToken = preview.data?.confirm_token;
+      if (!confirmToken) {
+        throw { code: "confirmation_expired", message: "预览已过期，请重新打开", retryable: false };
+      }
+      return api.submitWordPk(
+        confirmToken,
         (preview.data?.words ?? []).map((word) => ({
           word_id: word.word_id,
           known: known.has(word.word_id),
         })),
-      ),
+      );
+    },
     onSuccess: (data) => {
       setResult(data);
       setConfirmOpen(false);

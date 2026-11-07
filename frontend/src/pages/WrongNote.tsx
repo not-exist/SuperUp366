@@ -1,66 +1,51 @@
-import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api/commands";
-import type { CleanupPreview } from "../api/types";
-import { ClassChip } from "../components/ClassChip";
+import type {
+  CleanupPreview,
+  CleanupRun,
+  WrongNote,
+} from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/LoadingState";
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  TrashIcon,
-} from "../components/Icons";
-import {
-  ProgressList,
-  type ProgressEntry,
-} from "../components/ProgressList";
+import { TrashIcon } from "../components/Icons";
 import { useAccount } from "../hooks/account";
-import { errorMessage, formatDateTime } from "../utils";
-
-const PAGE_SIZE = 20;
+import { errorMessage } from "../utils";
 
 export function WrongNote() {
   const account = useAccount();
-  const queryClient = useQueryClient();
 
-  const [page, setPage] = useState(1);
+  const [subjectId, setSubjectId] = useState<string>("");
+  const [knowledgeId, setKnowledgeId] = useState<string>("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [preview, setPreview] = useState<CleanupPreview | null>(null);
-  const [progress, setProgress] = useState<ProgressEntry[]>([]);
-  const [running, setRunning] = useState(false);
-  const [summary, setSummary] = useState<string | null>(null);
-  const allRef = useRef<HTMLInputElement>(null);
+  const [run, setRun] = useState<CleanupRun | null>(null);
 
-  const notes = useQuery({
-    queryKey: ["wrong-notes", account.account_id, page],
-    queryFn: () => api.listWrongNotes(account.account_id, page, PAGE_SIZE),
+  const subjects = useQuery({
+    queryKey: ["wrong-subjects", account.account_id],
+    queryFn: () => api.listWrongSubjects(account.account_id),
   });
 
-  const items = notes.data?.items ?? [];
-  const total = notes.data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const knowledge = useQuery({
+    queryKey: ["wrong-knowledge", account.account_id, subjectId],
+    queryFn: () => api.listWrongKnowledge(account.account_id, subjectId),
+    enabled: Boolean(subjectId),
+  });
+
+  const pending = useQuery({
+    queryKey: ["wrong-pending", account.account_id, subjectId, knowledgeId],
+    queryFn: () =>
+      api.listWrongPending(account.account_id, subjectId, "", knowledgeId),
+    enabled: Boolean(subjectId) && Boolean(knowledgeId),
+  });
+
+  const items: WrongNote[] = pending.data ?? [];
   const allSelected =
-    items.length > 0 && items.every((note) => selected.has(note.question_id));
-  const someSelected = items.some((note) => selected.has(note.question_id));
-
-  useEffect(() => {
-    setSelected(new Set());
-  }, [page]);
-
-  useEffect(() => {
-    if (allRef.current) {
-      allRef.current.indeterminate = someSelected && !allSelected;
-    }
-  }, [someSelected, allSelected]);
-
-  useEffect(() => {
-    if (page > 1 && notes.isSuccess && items.length === 0) {
-      setPage((current) => Math.max(1, current - 1));
-    }
-  }, [page, notes.isSuccess, items.length]);
+    items.length > 0 &&
+    items.every((note) => selected.has(note.question_id));
 
   const previewMutation = useMutation({
     mutationFn: () =>
@@ -70,9 +55,17 @@ export function WrongNote() {
       ),
     onSuccess: (data) => {
       setPreview(data);
-      setProgress([]);
-      setSummary(null);
+      setRun(null);
       setConfirmOpen(true);
+    },
+  });
+
+  const cleanupMutation = useMutation({
+    mutationFn: () => api.cleanupWrongNotes(preview?.confirm_token ?? ""),
+    onSuccess: (data) => {
+      setRun(data);
+      setConfirmOpen(false);
+      void pending.refetch();
     },
   });
 
@@ -96,240 +89,197 @@ export function WrongNote() {
     );
   }
 
-  async function runCleanup() {
-    if (!preview) return;
-    setRunning(true);
-    setSummary(null);
-    setProgress(
-      preview.items.map((item) => ({
-        id: item.question_id,
-        label: item.title,
-        status: "pending",
-      })),
-    );
-
-    let done = 0;
-    let failed = 0;
-
-    for (const item of preview.items) {
-      setProgress((previous) =>
-        previous.map((entry) =>
-          entry.id === item.question_id
-            ? { ...entry, status: "running" }
-            : entry,
-        ),
-      );
-      try {
-        await api.cleanupWrongNote(account.account_id, item.question_id);
-        done += 1;
-        setProgress((previous) =>
-          previous.map((entry) =>
-            entry.id === item.question_id
-              ? { ...entry, status: "done", detail: "已清理" }
-              : entry,
-          ),
-        );
-      } catch (error) {
-        failed += 1;
-        setProgress((previous) =>
-          previous.map((entry) =>
-            entry.id === item.question_id
-              ? { ...entry, status: "failed", detail: errorMessage(error) }
-              : entry,
-          ),
-        );
-      }
-    }
-
-    setRunning(false);
-    setSummary(
-      `已清理 ${done} 题${failed > 0 ? `，${failed} 题失败` : ""}。`,
-    );
-    setSelected(new Set());
-    await queryClient.invalidateQueries({
-      queryKey: ["wrong-notes", account.account_id],
-    });
-  }
-
-  function closeDialog() {
-    if (running) return;
-    setConfirmOpen(false);
-    setPreview(null);
-    setProgress([]);
-    setSummary(null);
-    previewMutation.reset();
-  }
-
   return (
     <div className="page">
       <header className="page-header">
         <div>
           <h1 className="page-title">错题本</h1>
           <p className="page-subtitle">
-            勾选题目后一键清理。清理前会展示将提交的内容，清理过程逐题显示进度。
+            选择学科与知识点，勾选未清理的错题后一键清理。
           </p>
         </div>
       </header>
 
-      {notes.isPending && <LoadingState label="正在加载错题…" />}
-
-      {notes.isError && (
-        <ErrorState error={notes.error} onRetry={() => notes.refetch()} />
+      {subjects.isError && (
+        <ErrorState error={subjects.error} onRetry={() => subjects.refetch()} />
       )}
 
-      {notes.isSuccess && total === 0 && (
+      <section className="filter-row">
+        <label className="field">
+          <span className="field-label">学科</span>
+          <select
+            className="input"
+            value={subjectId}
+            onChange={(event) => {
+              setSubjectId(event.target.value);
+              setKnowledgeId("");
+              setSelected(new Set());
+            }}
+          >
+            <option value="">请选择学科</option>
+            {(subjects.data ?? []).map((subject) => (
+              <option key={subject.subject_id} value={subject.subject_id}>
+                {subject.subject_name}（未清理 {subject.wrong_count}）
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field">
+          <span className="field-label">知识点</span>
+          <select
+            className="input"
+            value={knowledgeId}
+            onChange={(event) => {
+              setKnowledgeId(event.target.value);
+              setSelected(new Set());
+            }}
+            disabled={!subjectId}
+          >
+            <option value="">请选择知识点</option>
+            {(knowledge.data ?? []).map((point) => (
+              <option key={point.knowledge_id} value={point.knowledge_id}>
+                {point.knowledge_name}（{point.wrong_count}）
+              </option>
+            ))}
+          </select>
+        </label>
+      </section>
+
+      {subjects.isPending && <LoadingState label="正在加载学科…" />}
+      {knowledge.isPending && Boolean(subjectId) && (
+        <LoadingState label="正在加载知识点…" />
+      )}
+
+      {pending.isError && (
+        <ErrorState error={pending.error} onRetry={() => pending.refetch()} />
+      )}
+
+      {!subjectId && !subjects.isPending && (
         <EmptyState
-          title="错题本为空"
-          description="当前账号没有需要清理的错题。"
+          title="先选择学科"
+          description="选择学科后才能看到知识点与未清理的错题。"
         />
       )}
 
-      {notes.isSuccess && total > 0 && (
+      {subjectId && !knowledgeId && !knowledge.isPending && (
+        <EmptyState
+          title="再选择知识点"
+          description="未清理的错题按知识点分组。"
+        />
+      )}
+
+      {pending.isSuccess && items.length === 0 && Boolean(knowledgeId) && (
+        <EmptyState
+          title="没有未清理的错题"
+          description="该知识点下暂无需要清理的题目。"
+        />
+      )}
+
+      {pending.isPending && Boolean(knowledgeId) && (
+        <LoadingState label="正在加载错题…" />
+      )}
+
+      {items.length > 0 && (
         <>
-          <div className="toolbar">
-            <label className="check" htmlFor="wrong-select-all">
+          <div className="overall-row">
+            <label className="checkbox">
               <input
-                id="wrong-select-all"
-                ref={allRef}
                 type="checkbox"
                 checked={allSelected}
                 onChange={toggleAll}
               />
-              全选本页
+              <span>全选本页（{items.length} 题）</span>
             </label>
-            <span className="field-hint">已选 {selected.size} 题</span>
-            <div className="toolbar-spacer" />
             <button
               type="button"
-              className="button button--danger"
-              onClick={() => previewMutation.mutate()}
+              className="button button--primary"
               disabled={selected.size === 0 || previewMutation.isPending}
+              onClick={() => previewMutation.mutate()}
             >
               <TrashIcon />
-              {previewMutation.isPending
-                ? "正在生成预览…"
-                : `一键清理${selected.size > 0 ? `（${selected.size}）` : ""}`}
+              清理所选（{selected.size}）
             </button>
           </div>
 
-          {previewMutation.isError && (
-            <div className="banner banner--danger" role="alert">
-              无法生成清理预览：{errorMessage(previewMutation.error)}
-            </div>
-          )}
-
-          <div className="wrong-list">
+          <ul className="wrong-list">
             {items.map((note) => {
               const checked = selected.has(note.question_id);
               return (
-                <div
-                  key={note.question_id}
-                  className={`wrong-row${checked ? " wrong-row--selected" : ""}`}
-                >
-                  <div className="wrong-check">
+                <li key={note.question_id} className="wrong-item">
+                  <label className="checkbox">
                     <input
                       type="checkbox"
                       checked={checked}
                       onChange={() => toggle(note.question_id)}
                       aria-label={`选择错题：${note.title}，${note.stem}`}
                     />
-                  </div>
-                  <div>
+                  </label>
+                  <div className="wrong-body">
                     <div className="wrong-meta">
-                      <ClassChip label={note.class_name} />
-                      <span>{note.title}</span>
-                      <span aria-hidden="true">·</span>
-                      <span>{note.question_type}</span>
-                      <span aria-hidden="true">·</span>
-                      <span>{formatDateTime(note.added_at)}</span>
+                      <strong>{note.title}</strong>
+                      <span className="badge">{note.question_type}</span>
                     </div>
                     <p className="wrong-stem">{note.stem}</p>
-                    <div className="wrong-answer">
-                      你的答案：{note.student_answer || "（空）"} · 正确答案：
-                      {note.correct_answer}
-                    </div>
+                    <p className="wrong-answer">
+                      正确答案：{note.correct_answer || "（未提供）"}
+                      {note.student_answer
+                        ? ` · 你的答案：${note.student_answer}`
+                        : ""}
+                    </p>
                   </div>
-                  <span className="badge badge--expired">错题</span>
-                </div>
+                </li>
               );
             })}
-          </div>
-
-          <div className="pagination">
-            <span>
-              第 {page} / {totalPages} 页 · 共 {total} 题
-            </span>
-            <button
-              type="button"
-              className="button button--sm"
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              disabled={page <= 1}
-            >
-              <ChevronLeftIcon />
-              上一页
-            </button>
-            <button
-              type="button"
-              className="button button--sm"
-              onClick={() =>
-                setPage((current) => Math.min(totalPages, current + 1))
-              }
-              disabled={page >= totalPages}
-            >
-              下一页
-              <ChevronRightIcon />
-            </button>
-          </div>
+          </ul>
         </>
       )}
 
+      {previewMutation.isError && (
+        <div className="banner banner--danger" role="alert">
+          {errorMessage(previewMutation.error)}
+        </div>
+      )}
+
+      {run && (
+        <div className="banner banner--warning" role="status">
+          <strong>{run.ok ? "已完成" : "未执行"}</strong>
+          <span>{run.message}</span>
+        </div>
+      )}
+
       <ConfirmDialog
-        open={confirmOpen}
-        title={summary ? "清理完成" : "确认一键清理"}
-        summary={
-          summary ? (
-            <>
-              <p role="status">{summary}</p>
-              <ProgressList items={progress} />
-            </>
-          ) : preview ? (
-            <>
-              <p>
-                将清理 {preview.total} 题，预计约 {preview.estimated_seconds}{" "}
-                秒。
-              </p>
-              <p className="field-hint">
-                {preview.batch_mode === "per_page"
-                  ? "服务端按页提交，进度以页为单位。"
-                  : "服务端逐题提交，下面逐题显示进度。"}
-              </p>
-              <ul className="summary-list">
-                {preview.items.slice(0, 12).map((item) => (
-                  <li key={item.question_id}>{item.title}</li>
-                ))}
-                {preview.items.length > 12 && (
-                  <li>以及其余 {preview.items.length - 12} 题</li>
-                )}
-              </ul>
-              {progress.length > 0 && <ProgressList items={progress} />}
-            </>
-          ) : (
-            <p>正在生成清理预览…</p>
-          )
-        }
-        confirmLabel={summary ? "关闭" : "确认清理"}
-        tone={summary ? "default" : "danger"}
-        busy={running}
-        hideCancel={Boolean(summary)}
-        onConfirm={() => {
-          if (summary) {
-            closeDialog();
-          } else {
-            void runCleanup();
-          }
+        open={confirmOpen && preview !== null}
+        title="清理所选错题"
+        onCancel={() => {
+          setConfirmOpen(false);
+          setPreview(null);
         }}
-        onCancel={closeDialog}
+        onConfirm={() => cleanupMutation.mutate()}
+        confirmLabel={preview?.granularity_confirmed ? "确认清理" : "生成预览"}
+        busy={cleanupMutation.isPending}
+        summary={
+          <>
+            <p>
+              将处理 {preview?.items.length ?? 0} 道错题。
+              {preview?.granularity_confirmed
+                ? "逐题提交，失败可单独重试。"
+                : "当前未对真实账号验证服务端是否支持逐题提交，本次只会生成预览，不会发送任何请求。"}
+            </p>
+            <ul className="summary-list">
+              {(preview?.items ?? []).slice(0, 8).map((item) => (
+                <li key={item.question_id}>{item.title}</li>
+              ))}
+            </ul>
+          </>
+        }
       />
+
+      {cleanupMutation.isError && (
+        <div className="banner banner--danger" role="alert">
+          {errorMessage(cleanupMutation.error)}
+        </div>
+      )}
     </div>
   );
 }

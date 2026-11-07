@@ -3,8 +3,8 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/commands";
 import type {
-  ReadAloudQuestion,
-  SubmitResult,
+  ReadAloudPreview,
+  ReadAloudSlot,
   UploadStatus,
 } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -13,7 +13,7 @@ import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/LoadingState";
 import { ArrowLeftIcon, UploadIcon } from "../components/Icons";
 import { useAccount } from "../hooks/account";
-import { errorMessage, fileToBase64, percent } from "../utils";
+import { errorMessage, percent } from "../utils";
 
 interface LocalUpload {
   status: UploadStatus;
@@ -21,15 +21,21 @@ interface LocalUpload {
   error?: string;
 }
 
+// The OSS transfer is not wired yet, so a validated file is "ready" and must
+// never be presented as uploaded.
 const UPLOAD_LABELS: Record<UploadStatus, string> = {
   idle: "未选择",
+  validating: "校验中",
+  ready: "已校验（未上传）",
   uploading: "上传中",
   uploaded: "已上传",
-  failed: "上传失败",
+  failed: "校验失败",
 };
 
 const UPLOAD_BADGE: Record<UploadStatus, string> = {
   idle: "badge--unknown",
+  validating: "badge--pending",
+  ready: "badge--pending",
   uploading: "badge--pending",
   uploaded: "badge--finished",
   failed: "badge--expired",
@@ -41,7 +47,7 @@ export function ReadAloud() {
   const queryClient = useQueryClient();
   const [uploads, setUploads] = useState<Record<string, LocalUpload>>({});
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [result, setResult] = useState<SubmitResult | null>(null);
+  const [result, setResult] = useState<ReadAloudPreview | null>(null);
 
   const task = useQuery({
     queryKey: ["read-aloud", account.account_id, jobId],
@@ -49,30 +55,24 @@ export function ReadAloud() {
     enabled: Boolean(jobId),
   });
 
-  const settings = useQuery({
-    queryKey: ["settings"],
-    queryFn: api.getSettings,
-  });
+  // The score path is closed until the payload shape is confirmed, so this
+  // is always a dry run regardless of the settings toggle.
+  const dryRun = true;
+  const slots = task.data?.slots ?? [];
 
-  const dryRun = settings.data?.read_aloud_dry_run ?? true;
-  const questions = task.data?.questions ?? [];
-
-  function statusFor(question: ReadAloudQuestion): UploadStatus {
+  function statusFor(slot: ReadAloudSlot): UploadStatus {
     return (
-      uploads[question.question_id]?.status ??
-      (question.record_url ? "uploaded" : "idle")
+      uploads[slot.question_id]?.status ??
+      (slot.record_url ? "uploaded" : "idle")
     );
   }
 
-  const uploadedCount = questions.filter(
-    (question) => statusFor(question) === "uploaded",
-  ).length;
-  const allUploaded =
-    questions.length > 0 && uploadedCount === questions.length;
+  const readyCount = slots.filter((slot) => statusFor(slot) === "ready").length;
+  const allReady = slots.length > 0 && readyCount === slots.length;
 
   const submit = useMutation({
     mutationFn: () =>
-      api.submitReadAloud(account.account_id, jobId ?? "", dryRun),
+      api.submitReadAloud(account.account_id, jobId ?? "", true),
     onSuccess: (data) => {
       setResult(data);
       setConfirmOpen(false);
@@ -82,8 +82,8 @@ export function ReadAloud() {
     },
   });
 
-  async function handleFile(question: ReadAloudQuestion, file: File) {
-    const questionId = question.question_id;
+  async function handleFile(slot: ReadAloudSlot, file: File) {
+    const questionId = slot.question_id;
     if (!file.name.toLowerCase().endsWith(".mp3")) {
       setUploads((previous) => ({
         ...previous,
@@ -98,21 +98,21 @@ export function ReadAloud() {
 
     setUploads((previous) => ({
       ...previous,
-      [questionId]: { status: "uploading", fileName: file.name },
+      [questionId]: { status: "validating", fileName: file.name },
     }));
 
     try {
-      const dataBase64 = await fileToBase64(file);
       await api.uploadRecording(
         account.account_id,
         jobId ?? "",
         questionId,
         file.name,
-        dataBase64,
+        file.name,
       );
       setUploads((previous) => ({
         ...previous,
-        [questionId]: { status: "uploaded", fileName: file.name },
+        // "ready", not "uploaded": the bytes never left the machine.
+        [questionId]: { status: "ready", fileName: file.name },
       }));
     } catch (error) {
       setUploads((previous) => ({
@@ -133,8 +133,8 @@ export function ReadAloud() {
           <h1 className="page-title">{task.data?.title ?? "朗读跟读"}</h1>
           <p className="page-subtitle">
             {task.data
-              ? `共 ${questions.length} 题，每个问题上传一段 mp3`
-              : "逐题选择并上传录音。"}
+              ? `共 ${slots.length} 段录音，每段对应一道跟读题`
+              : "逐题选择录音文件。"}
           </p>
         </div>
         <div className="page-actions">
@@ -163,15 +163,18 @@ export function ReadAloud() {
           <span>
             {dryRun
               ? "当前为演练模式：只上传并校验录音，不向服务器提交成绩。可在设置中关闭演练。"
-              : "演练模式已关闭，提交会调用正式成绩接口。"}
+              : ""}
           </span>
         </div>
       </div>
 
       {result && (
         <div className="banner banner--success" role="status">
-          <strong>{result.ok ? "操作成功" : "操作失败"}</strong>
-          <span>{result.message}</span>
+          <strong>已生成提交预览</strong>
+          <span>
+            预览仅包含将要发送的内容，尚未向服务器提交成绩
+            {result.dry_run ? "" : "（注意：本次并非演练）"}。
+          </span>
         </div>
       )}
 
@@ -181,25 +184,25 @@ export function ReadAloud() {
         </div>
       )}
 
-      {task.isSuccess && questions.length === 0 && (
+      {task.isSuccess && slots.length === 0 && (
         <EmptyState
           title="暂无朗读题目"
           description="该作业不包含 question_type = 9 的题目。"
         />
       )}
 
-      {task.isSuccess && questions.length > 0 && (
+      {task.isSuccess && slots.length > 0 && (
         <>
           <div className="overall-row">
             <div style={{ flex: "1 1 240px" }}>
               <div className="field-hint">
-                已上传 {uploadedCount} / {questions.length}
+                已校验 {readyCount} / {slots.length}
               </div>
               <div className="progress-track" aria-hidden="true">
                 <div
                   className="progress-fill"
                   style={{
-                    width: `${percent(uploadedCount, questions.length)}%`,
+                    width: `${percent(readyCount, slots.length)}%`,
                   }}
                 />
               </div>
@@ -208,30 +211,30 @@ export function ReadAloud() {
               type="button"
               className="button button--primary"
               onClick={() => setConfirmOpen(true)}
-              disabled={!allUploaded || submit.isPending || result?.ok === true}
+              disabled={!allReady || submit.isPending || result !== null}
             >
               <UploadIcon />
-              {result?.ok ? "已提交" : dryRun ? "演练提交" : "提交成绩"}
+              {result ? "已生成预览" : "生成提交预览"}
             </button>
           </div>
 
           <div className="stack">
-            {questions.map((question) => {
-              const status = statusFor(question);
-              const local = uploads[question.question_id];
-              const inputId = `file-${question.question_id}`;
+            {slots.map((slot) => {
+              const status = statusFor(slot);
+              const local = uploads[slot.question_id];
+              const inputId = `file-${slot.question_id}`;
               return (
-                <article key={question.question_id} className="read-card">
+                <article key={slot.question_id} className="read-card">
                   <div className="read-head">
-                    <span className="question-no">第 {question.number} 题</span>
+                    <span className="question-no">第 {slot.number} 题</span>
                     <span className={`badge ${UPLOAD_BADGE[status]}`}>
                       <span className="badge__dot" aria-hidden="true" />
                       {UPLOAD_LABELS[status]}
                     </span>
                   </div>
-                  <p className="read-sentence">{question.sentence}</p>
-                  {question.audio_url && (
-                    <audio controls src={question.audio_url} preload="none" />
+                  <p className="read-sentence">{slot.sentence}</p>
+                  {slot.audio_url && (
+                    <audio controls src={slot.audio_url} preload="none" />
                   )}
                   <div className="read-controls">
                     <label className="field-label" htmlFor={inputId}>
@@ -246,7 +249,7 @@ export function ReadAloud() {
                       onChange={(event) => {
                         const file = event.currentTarget.files?.[0];
                         event.currentTarget.value = "";
-                        if (file) void handleFile(question, file);
+                        if (file) void handleFile(slot, file);
                       }}
                     />
                     {local?.fileName && (
@@ -272,29 +275,27 @@ export function ReadAloud() {
 
       <ConfirmDialog
         open={confirmOpen}
-        title={dryRun ? "演练提交" : "提交朗读成绩"}
+        title="生成提交预览"
         summary={
           <>
             <p>
-              将处理 {uploadedCount} 题录音。
-              {dryRun
-                ? "本次只做上传校验与演练，不会写入成绩。"
-                : "本次将调用正式成绩接口，提交后可能无法修改。"}
+              将处理 {readyCount} 段录音。此操作只会生成将要发送的内容，不会
+              向服务器提交成绩。
             </p>
             <ul className="summary-list">
-              {questions
-                .filter((question) => statusFor(question) === "uploaded")
+              {slots
+                .filter((slot: ReadAloudSlot) => statusFor(slot) === "ready")
                 .slice(0, 8)
-                .map((question) => (
-                  <li key={question.question_id}>
-                    第 {question.number} 题 · {question.sentence}
+                .map((slot) => (
+                  <li key={slot.question_id}>
+                    第 {slot.number} 题 · {slot.sentence}
                   </li>
                 ))}
             </ul>
           </>
         }
-        confirmLabel={dryRun ? "开始演练" : "确认提交"}
-        tone={dryRun ? "default" : "danger"}
+        confirmLabel="生成预览"
+        tone="default"
         busy={submit.isPending}
         onConfirm={() => submit.mutate()}
         onCancel={() => setConfirmOpen(false)}

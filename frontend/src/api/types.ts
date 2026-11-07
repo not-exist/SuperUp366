@@ -131,32 +131,63 @@ export interface WrongNote {
   added_at: string;
 }
 
-export interface WrongNotePage {
-  items: WrongNote[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
 export interface CleanupPreviewItem {
   question_id: string;
   title: string;
 }
 
 export interface CleanupPreview {
-  total: number;
-  estimated_seconds: number;
-  /** Server-side cleanup granularity. Drives the progress wording. */
-  batch_mode: "per_question" | "per_page";
   items: CleanupPreviewItem[];
+  total: number;
+  /**
+   * False until per-question submission is confirmed against a real account.
+   * While false the run refuses to send, so the UI must say so instead of
+   * showing a submit button that silently does nothing.
+   */
+  granularity_confirmed: boolean;
+  /** One-shot token for `wrongnotes_cleanup`. */
+  confirm_token: string;
 }
 
-export interface CleanupResult {
+/** One question's outcome inside a cleanup run. */
+export interface CleanupItemResult {
+  question_id: string;
+  /** `cleared`, `failed`, or `skipped`. */
+  state: string;
+  message: string;
+}
+
+export interface CleanupRun {
   ok: boolean;
   message: string;
-  remaining: number;
+  items: CleanupItemResult[];
+  /** How many questions were actually cleared. */
+  cleared: number;
 }
 
+/** One subject row, used to fill the picker. */
+export interface WrongSubject {
+  subject_id: string;
+  subject_name: string;
+  wrong_count: number;
+  killed_count: number;
+}
+
+/** One knowledge point. */
+export interface WrongKnowledge {
+  knowledge_id: string;
+  knowledge_name: string;
+  qtype_id: string;
+  qtype_name: string;
+  wrong_count: number;
+}
+
+export interface WordPkResult {
+  ok: boolean;
+  message: string;
+}
+
+/** One word as the word-PK picker renders it. */
 export interface WordPkWord {
   word_id: string;
   word: string;
@@ -172,6 +203,8 @@ export interface WordPkPreview {
   my_score: number | null;
   opponent_score: number | null;
   words: WordPkWord[];
+  /** One-shot token for `wordpk_submit`. */
+  confirm_token: string;
 }
 
 export interface WordPkAnswer {
@@ -179,16 +212,16 @@ export interface WordPkAnswer {
   known: boolean;
 }
 
-export type UploadStatus = "idle" | "uploading" | "uploaded" | "failed";
+export type UploadStatus = "idle" | "validating" | "ready" | "uploading" | "uploaded" | "failed";
 
-export interface ReadAloudQuestion {
+export interface ReadAloudSlot {
   question_id: string;
   number: number;
   prompt: string;
   sentence: string;
   /** Reference audio supplied by the server, if any. */
   audio_url: string | null;
-  /** Filled once a recording has been uploaded. */
+  /** Set once a recording has been uploaded; `null` means "ready" only. */
   record_url: string | null;
 }
 
@@ -196,19 +229,27 @@ export interface ReadAloudTask {
   job_id: string;
   title: string;
   submitted: boolean;
-  questions: ReadAloudQuestion[];
+  slots: ReadAloudSlot[];
+  /** Always false until the submission payload is confirmed. */
+  submission_enabled: boolean;
 }
 
-export interface SubmitResult {
+export interface ReadAloudUpload {
   ok: boolean;
-  message: string;
-  score?: number | null;
+  question_id: string;
+  file_name: string;
+  size: number;
+  /** `null` until the OSS transfer is wired: the slot is "ready", not uploaded. */
+  record_url: string | null;
 }
 
-export interface UploadResult {
-  ok: boolean;
-  record_url: string;
-  object_ids: string[];
+export interface ReadAloudPreview {
+  job_id: string;
+  title: string;
+  /** The exact payload a submission would carry. */
+  payload: Record<string, unknown>;
+  /** True when nothing was sent. */
+  dry_run: boolean;
 }
 
 export interface Settings {
@@ -257,51 +298,60 @@ export interface CommandMap {
     result: AnswerDocument;
   };
 
-  word_pk_preview: {
+  wordpk_preview: {
     args: { account_id: string; job_id: string };
     result: WordPkPreview;
   };
-  word_pk_submit: {
-    args: { account_id: string; job_id: string; answers: WordPkAnswer[] };
-    result: SubmitResult;
+  wordpk_submit: {
+    args: { confirm_token: string; answers: WordPkAnswer[] };
+    result: WordPkResult;
   };
 
-  read_aloud_get: {
+  readaloud_get: {
     args: { account_id: string; job_id: string };
     result: ReadAloudTask;
   };
-  read_aloud_upload: {
+  readaloud_upload: {
     args: {
       account_id: string;
       job_id: string;
-      question_id: string;
-      file_name: string;
-      data_base64: string;
+      recording: { question_id: string; path: string; file_name: string };
     };
-    result: UploadResult;
+    result: ReadAloudUpload;
   };
-  read_aloud_submit: {
+  readaloud_submit: {
     args: { account_id: string; job_id: string; dry_run: boolean };
-    result: SubmitResult;
+    result: ReadAloudPreview;
   };
 
-  wrong_notes_list: {
+  wrongnotes_subjects: { args: { account_id: string }; result: WrongSubject[] };
+  wrongnotes_knowledge: {
     args: {
       account_id: string;
-      page: number;
-      page_size: number;
-      course_id?: string;
+      filter: {
+        subject_id?: string;
+        book_id?: string;
+        knowledge_id?: string;
+      };
     };
-    result: WrongNotePage;
+    result: WrongKnowledge[];
   };
-  wrong_notes_preview: {
+  wrongnotes_pending: {
+    args: {
+      account_id: string;
+      filter: {
+        subject_id?: string;
+        book_id?: string;
+        knowledge_id?: string;
+      };
+    };
+    result: WrongNote[];
+  };
+  wrongnotes_preview: {
     args: { account_id: string; question_ids: string[] };
     result: CleanupPreview;
   };
-  wrong_notes_cleanup: {
-    args: { account_id: string; question_id: string };
-    result: CleanupResult;
-  };
+  wrongnotes_cleanup: { args: { confirm_token: string }; result: CleanupRun };
 
   settings_get: { args: Record<string, never>; result: Settings };
   settings_update: { args: { settings: Settings }; result: Settings };

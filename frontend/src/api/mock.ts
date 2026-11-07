@@ -13,19 +13,21 @@ import type {
   BookDetail,
   BookJob,
   CleanupPreview,
-  CleanupResult,
+  CleanupRun,
   CommandMap,
   Course,
   JobRow,
   JobStatus,
   JobStatusKind,
+  ReadAloudPreview,
   ReadAloudTask,
+  ReadAloudUpload,
   Settings,
-  SubmitResult,
-  UploadResult,
   WordPkPreview,
+  WordPkResult,
+  WrongKnowledge,
   WrongNote,
-  WrongNotePage,
+  WrongSubject,
 } from "./types";
 
 const DAY = 86_400_000;
@@ -332,6 +334,7 @@ function wordPkPreview(jobId: string): WordPkPreview {
     bucket_id: `bucket-${hash(jobId) % 1000}`,
     my_score: 7,
     opponent_score: 5,
+    confirm_token: "mock-wordpk-token",
     words: wordSeeds.map(([word, phonetic, translation], index) => ({
       word_id: `${jobId}-w${index + 1}`,
       word,
@@ -360,7 +363,7 @@ function readAloudTask(jobId: string): ReadAloudTask {
     job_id: jobId,
     title: job?.name ?? "课文跟读",
     submitted: false,
-    questions: readAloudSentences.map((sentence, index) => {
+    slots: readAloudSentences.map((sentence, index) => {
       const questionId = `${jobId}-ra${index + 1}`;
       return {
         question_id: questionId,
@@ -368,9 +371,12 @@ function readAloudTask(jobId: string): ReadAloudTask {
         prompt: "朗读下面的句子",
         sentence,
         audio_url: null,
+        // Simulates a slot whose recording was already uploaded upstream.
         record_url: uploads.get(questionId) ?? null,
       };
     }),
+    // Mirrors the backend: the submit path stays closed.
+    submission_enabled: false,
   };
 }
 
@@ -490,101 +496,126 @@ export async function handleMock(
       return buildAnswer(job_id, job?.name ?? "作业答案");
     }
 
-    case "word_pk_preview": {
-      const { job_id } = args as CommandMap["word_pk_preview"]["args"];
+    case "wordpk_preview": {
+      const { job_id } = args as CommandMap["wordpk_preview"]["args"];
       await latency();
       return wordPkPreview(job_id);
     }
 
-    case "word_pk_submit": {
+    case "wordpk_submit": {
       await sleep(620);
-      const { answers } = args as CommandMap["word_pk_submit"]["args"];
+      const { answers } = args as CommandMap["wordpk_submit"]["args"];
       const known = answers.filter((answer) => answer.known).length;
       return {
         ok: true,
         message: `已提交 ${answers.length} 个单词，其中 ${known} 个标记为已掌握（预览环境）。`,
-        score: known * 10,
-      } satisfies SubmitResult;
+      } satisfies WordPkResult;
     }
 
-    case "read_aloud_get": {
-      const { job_id } = args as CommandMap["read_aloud_get"]["args"];
+    case "readaloud_get": {
+      const { job_id } = args as CommandMap["readaloud_get"]["args"];
       await latency();
       return readAloudTask(job_id);
     }
 
-    case "read_aloud_upload": {
-      const { job_id, question_id, file_name, data_base64 } =
-        args as CommandMap["read_aloud_upload"]["args"];
+    case "readaloud_upload": {
+      const { recording } = args as CommandMap["readaloud_upload"]["args"];
+      const { question_id, file_name } = recording;
       if (!file_name.toLowerCase().endsWith(".mp3")) {
         throw { code: "invalid_input", message: "只接受 mp3 文件", retryable: false };
       }
-      if (!data_base64) {
-        throw { code: "invalid_input", message: "文件内容为空", retryable: false };
-      }
       await sleep(520);
-      const recordUrl = `oss://mock/${job_id}/${question_id}.mp3`;
-      uploads.set(question_id, recordUrl);
+      // Mirrors the backend: validated locally, never uploaded.
       return {
         ok: true,
-        record_url: recordUrl,
-        object_ids: [`object-${question_id}`],
-      } satisfies UploadResult;
+        question_id,
+        file_name,
+        size: 1_024,
+        record_url: null,
+      } satisfies ReadAloudUpload;
     }
 
-    case "read_aloud_submit": {
-      const { dry_run } = args as CommandMap["read_aloud_submit"]["args"];
+    case "readaloud_submit": {
+      const { job_id } = args as CommandMap["readaloud_submit"]["args"];
+      const { dry_run } = args as CommandMap["readaloud_submit"]["args"];
       await sleep(700);
+      const task = readAloudTask(job_id);
       return {
-        ok: true,
-        message: dry_run
-          ? "演练完成：录音已全部上传并通过校验，未向服务器提交成绩。"
-          : "成绩已提交（预览环境，不会产生真实请求）。",
-      } satisfies SubmitResult;
+        job_id,
+        title: task.title,
+        payload: { jobId: job_id, slots: task.slots },
+        dry_run,
+      } satisfies ReadAloudPreview;
     }
 
-    case "wrong_notes_list": {
-      const { page, page_size } = args as CommandMap["wrong_notes_list"]["args"];
+    case "wrongnotes_subjects": {
       await latency();
-      const start = Math.max(0, (page - 1) * page_size);
-      return {
-        items: wrongNotes.slice(start, start + page_size).map((note) => ({ ...note })),
-        total: wrongNotes.length,
-        page,
-        page_size,
-      } satisfies WrongNotePage;
+      return [
+        {
+          subject_id: "2",
+          subject_name: "英语",
+          wrong_count: 7,
+          killed_count: 12,
+        },
+      ] satisfies WrongSubject[];
     }
 
-    case "wrong_notes_preview": {
-      const { question_ids } = args as CommandMap["wrong_notes_preview"]["args"];
+    case "wrongnotes_knowledge": {
+      await latency();
+      return [
+        {
+          knowledge_id: "K1",
+          knowledge_name: "动词时态",
+          qtype_id: "5",
+          qtype_name: "选择题",
+          wrong_count: 3,
+        },
+      ] satisfies WrongKnowledge[];
+    }
+
+    case "wrongnotes_pending": {
+      await latency();
+      const start = 0;
+      return wrongNotes
+        .slice(start, start + 20)
+        .map((note) => ({ ...note }));
+    }
+
+    case "wrongnotes_preview": {
+      const { question_ids } = args as CommandMap["wrongnotes_preview"]["args"];
       await sleep(260);
       const selected = wrongNotes.filter((note) =>
         question_ids.includes(note.question_id),
       );
       return {
         total: selected.length,
-        estimated_seconds: selected.length * 2,
-        batch_mode: "per_question",
+        granularity_confirmed: false,
         items: selected.map((note) => ({
           question_id: note.question_id,
           title: `${note.title} · ${note.question_type}`,
         })),
+        confirm_token: "mock-confirm-token",
       } satisfies CleanupPreview;
     }
 
-    case "wrong_notes_cleanup": {
-      const { question_id } = args as CommandMap["wrong_notes_cleanup"]["args"];
-      await sleep(320);
-      const before = wrongNotes.length;
-      wrongNotes = wrongNotes.filter((note) => note.question_id !== question_id);
-      if (wrongNotes.length === before) {
-        throw { code: "not_found", message: "题目已不存在", retryable: false };
+    case "wrongnotes_cleanup": {
+      const { confirm_token } = args as CommandMap["wrongnotes_cleanup"]["args"];
+      if (confirm_token !== "mock-confirm-token") {
+        throw {
+          code: "confirmation_expired",
+          message: "确认已过期，请重新生成预览",
+          retryable: false,
+        };
       }
+      await sleep(320);
+      // Mirrors the backend: granularity is unconfirmed, so nothing is sent.
       return {
-        ok: true,
-        message: "已清理",
-        remaining: wrongNotes.length,
-      } satisfies CleanupResult;
+        ok: false,
+        message:
+          "错题清理尚未对真实账号验证：服务端是否支持逐题提交未知，已停止，未发送任何请求",
+        items: [],
+        cleared: 0,
+      } satisfies CleanupRun;
     }
 
     case "settings_get": {
