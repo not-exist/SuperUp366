@@ -1,104 +1,116 @@
 # Command contract
 
 The React app never talks to `up366.cn`. It calls these Tauri commands and
-renders the result. All commands return `Result<T, AppError>` where
-`AppError = { code: string, message: string, retryable: boolean }`.
+renders the result. The authoritative TypeScript declaration lives in
+`frontend/src/api/types.ts` (`CommandMap`); this document explains the shape.
+
+All commands take a single object argument with **snake_case** keys, and return
+`Result<T, AppError>` where
+
+```ts
+type AppError = { code: string; message: string; retryable: boolean };
+```
+
+Error codes come from `up366_core::DomainError::code`:
+`session_expired`, `auth_failed`, `api_error`, `duplicate_submission`,
+`network_error`, `protocol_drift`, `invalid_input`, `unsupported`.
 
 ## Accounts
 
 | Command | Args | Returns |
 | --- | --- | --- |
 | `accounts_list` | — | `Account[]` |
-| `login` | `username, password` | `Account` |
-| `logout` | `account_id` | `void` |
-| `switch_account` | `account_id` | `Account` |
-| `accounts_remove` | `account_id` | `void` |
-| `session_status` | `account_id` | `{ state: "valid" \| "needs_reauth" }` |
+| `account_login` | `username, password` | `Account` |
+| `account_switch` | `account_id` | `Account` |
+| `account_logout` | `account_id` | `null` |
 
-`Account` carries only non-sensitive fields: `id, username, display_name, uid,
-school_id, user_type, status, last_login_at`.
+`Account` contains only non-sensitive fields:
+`account_id, username, display_name, school_name, active, session_valid,
+expires_at`. Session secrets stay in the OS credential store.
 
 ## Catalog
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `courses_list` | `refresh: bool` | `Course[]` |
-| `jobs_merged` | `refresh: bool, filter?: JobFilter` | `{ rows: JobRow[], fetched_at, stale }` |
-| `job_detail` | `job_id` | `JobDetail` |
+| `courses_list` | `account_id` | `Course[]` |
+| `jobs_list` | `account_id, refresh?` | `JobRow[]` |
 
-`JobRow` is flat across classes:
+`JobRow` is the flat, cross-class list:
 
 ```ts
 type JobRow = {
   job_id: string;
-  name: string;
   course_id: string;
-  class_name: string;      // small label next to the name
+  course_name: string;
+  class_name: string;              // label on the row, never a grouping key
+  name: string;
   kind: "ordinary" | "word_pk" | "unknown";
-  state: "finished" | "returned" | "expired" | "pending" | "unknown";
-  score?: number | null;
-  max_score?: number | null;
-  deadline?: string | null; // ISO 8601
-  has_readaloud?: boolean;
+  status: { kind: "finished" | "returned" | "expired" | "pending" | "unknown";
+            score?: number | null };
+  score: number | null;
+  deadline: string | null;         // ISO 8601 UTC
+  read_aloud: boolean;
 };
 ```
+
+Rows are produced by `up366_sync::merge_jobs`: courses in upstream order, then
+the upstream array order inside each course. The same job under two classes
+yields two rows.
 
 ## Books
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `books_list` | `refresh: bool` | `Book[]` |
-| `book_tree` | `book_id` | `BookTree` |
-| `book_tasks` | `book_id` | `BookTask[]` (same shape as `JobRow`) |
+| `books_list` | `account_id` | `Book[]` |
+| `book_detail` | `account_id, book_id` | `BookDetail` (book + chapters + job rows) |
 
 ## Answers
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `answer_detail` | `job_id` | `AnswerDocument` |
+| `answer_get` | `account_id, job_id` | `AnswerDocument` |
 
-```ts
-type AnswerDocument = {
-  job_id: string;
-  questions: Question[];   // id, no, stem, correct, user_answer, score
-  raw_paper_xml?: string;  // collapsed in the UI
-  drift?: string;          // set when parsing failed
-};
-```
+`AnswerDocument.task_id` is the job's `contentId` — that is what the upstream
+endpoint requires, not the job id. `paper_xml` is kept verbatim for the
+collapsed raw view.
 
 ## Word PK
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `wordpk_words` | `job_id` | `Word[]` |
-| `wordpk_prepare` | `job_id, score, total` | `{ preview: WordPkPreview, confirm_token }` |
-| `wordpk_submit` | `confirm_token` | `SubmissionResult` |
+| `word_pk_preview` | `account_id, job_id` | `WordPkPreview` |
+| `word_pk_submit` | `account_id, job_id, answers` | `SubmitResult` |
 
 ## Read-aloud
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `readaloud_task` | `job_id` | `ReadAloudTask` (slots per question) |
-| `import_audio` | `job_id, question_id, path` | `AudioAsset` |
-| `upload_audio` | `job_id, confirm_token` | `UploadResult` |
-| `readaloud_prepare_submit` | `job_id, scores?` | `{ preview, confirm_token }` |
-| `readaloud_submit` | `confirm_token` | `SubmissionResult` |
+| `read_aloud_get` | `account_id, job_id` | `ReadAloudTask` |
+| `read_aloud_upload` | `account_id, job_id, question_id, file_name, data_base64` | `UploadResult` |
+| `read_aloud_submit` | `account_id, job_id, dry_run` | `SubmitResult` |
 
-`upload_audio` and `readaloud_submit` are separate on purpose: the UI must be
-able to show "uploaded" without claiming "submitted".
+Upload and submit are separate commands on purpose: the UI must be able to show
+"uploaded" without claiming "submitted". `dry_run` defaults to true while the
+submission shape is still in `docs/protocol/to-probe.md`.
 
 ## Wrong-notes
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `wrongnote_subjects` | — | `WrongSubject[]` |
-| `wrongnote_knowledge` | `subject_id, book_id, page` | `WrongNotePage` |
-| `wrongnote_pending` | `filter` | `WrongQuestion[]` |
-| `wrongnote_answers` | `question_ids` | `WrongAnswerBundle` |
-| `wrongnote_prepare_clean` | `question_ids` | `{ items, confirm_token }` |
-| `wrongnote_execute_clean` | `confirm_token` | `RunHandle` |
-| `wrongnote_cancel_clean` | `run_id` | `void` |
-| `wrongnote_run_status` | `run_id` | `CleanRun` |
+| `wrong_notes_list` | `account_id, page, page_size, course_id?` | `WrongNotePage` |
+| `wrong_notes_preview` | `account_id, question_ids` | `CleanupPreview` |
+| `wrong_notes_cleanup` | `account_id, question_id` | `CleanupResult` |
+
+`CleanupPreview.batch_mode` is `per_question` or `per_page`: the UI wording and
+progress model depend on which granularity the server actually accepts.
+
+## Settings
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `settings_get` | — | `Settings` |
+| `settings_update` | `settings` | `Settings` |
+| `cache_clear` | — | `null` |
 
 ## Events
 
@@ -109,8 +121,9 @@ able to show "uploaded" without claiming "submitted".
 | `upload://progress` | `{ job_id, question_id, sent, total }` |
 | `submission://state` | `{ run_id, question_id, state }` |
 
-## Write rules
+## Write safety
 
-`prepare_*` returns a single-use `confirm_token` with a short TTL. `execute`
-consumes it and fails with `invalid_input` if it is missing, expired or already
-used. This prevents double submissions from double clicks or stale UI state.
+Every mutating command either takes an explicit `dry_run` flag or a single-use
+`confirm_token` issued by a preceding `*_preview` call. A token is invalidated
+on use, so a double click cannot submit twice. Partial batch failures are
+persisted per item and resumed rather than replayed.
