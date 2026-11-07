@@ -16,7 +16,7 @@ const LABELS: Record<ProgressState, string> = {
 
 export function ProgressList({ items }: { items: ProgressEntry[] }) {
   return (
-    <ul className="progress-list" aria-label="处理进度">
+    <ul className="progress-list" aria-label="处理进度" aria-live="polite">
       {items.map((item) => (
         <li
           key={item.id}

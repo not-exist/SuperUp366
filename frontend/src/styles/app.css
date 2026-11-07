@@ -760,6 +760,7 @@ textarea {
 }
 
 .progress-fill {
+  display: block;
   height: 100%;
   border-radius: 999px;
   background: var(--color-primary);
@@ -1092,16 +1093,6 @@ textarea {
 }
 
 /* --- dialog --------------------------------------------------------- */
-
-.dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgba(10, 15, 25, 0.55);
-}
 
 dialog.dialog {
   width: min(620px, 100%);
