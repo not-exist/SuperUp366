@@ -164,6 +164,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn v2_405_falls_back_to_v1() {
+        let server = MockServer::start();
+        let v2 = server.mock(|when, then| {
+            when.method(POST).path("/client/student/task/answer/detail/v2");
+            then.status(405).body("method not allowed");
+        });
+        let v1 = server.mock(|when, then| {
+            when.method(GET).path("/client/student/task/answer/detail");
+            then.status(200).json_body(ok(json!({ "paperInfo": {}, "userAnswer": {} })));
+        });
+
+        let client = client(&server);
+        answer_detail(&client, &params()).await.unwrap();
+        v2.assert_hits(1);
+        v1.assert_hits(1);
+    }
+
+    #[tokio::test]
     async fn paper_detail_returns_xml_string() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
