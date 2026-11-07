@@ -1,11 +1,8 @@
-//! Orchestration layer. Skeleton only; the run loop lands in a later step.
+//! Orchestration: aggregation, caching policy and submission workflows.
+//!
+//! Currently only the aggregation rule; the run loop and cache land in later
+//! steps.
 
-use thiserror::Error;
+pub mod aggregate;
 
-#[derive(Debug, Error)]
-pub enum SyncError {
-    #[error("{0}")]
-    Other(String),
-}
-
-pub type Result<T> = std::result::Result<T, SyncError>;
+pub use aggregate::{merge_jobs, CourseJobs, JobRow, ScrapedJob};
