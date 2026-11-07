@@ -1,0 +1,12 @@
+[package]
+name = "up366-media"
+description = "Media pipeline for up366: probing, transcoding and thumbnail generation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+up366-core.workspace = true
+thiserror.workspace = true

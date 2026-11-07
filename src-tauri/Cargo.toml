@@ -1,0 +1,25 @@
+[package]
+name = "up366-app"
+description = "SuperUp366 desktop shell (Tauri 2)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "up366_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde.workspace = true
+serde_json.workspace = true
+up366-core.workspace = true
+up366-protocol.workspace = true
+up366-store.workspace = true
+up366-media.workspace = true
+up366-sync.workspace = true

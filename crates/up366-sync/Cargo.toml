@@ -1,0 +1,12 @@
+[package]
+name = "up366-sync"
+description = "Orchestration for up366: scheduling, retries and end-to-end task runs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+up366-core.workspace = true
+thiserror.workspace = true

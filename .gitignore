@@ -1,0 +1,33 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node
+node_modules/
+/frontend/dist/
+/frontend/.vite/
+*.tsbuildinfo
+
+# Tauri
+/src-tauri/gen/
+/src-tauri/target/
+
+# Local runtime data
+*.db
+*.db-wal
+*.db-shm
+/.data/
+
+# Local analysis drafts (extracted client, captures); see README
+/extract/
+/work/
+/test000/
+*.7z
+*.bin
+/conversation-*.txt
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
