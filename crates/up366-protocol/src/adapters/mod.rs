@@ -11,6 +11,7 @@ pub mod catalog;
 pub mod readaloud;
 pub mod wordpk;
 pub mod words;
+pub mod wrongnote;
 
 pub use answers::{answer_detail, answer_detail_v1, answer_detail_v2, paper_detail};
 pub use books::{book_info, book_plan, book_tree, books};
@@ -21,6 +22,10 @@ pub use readaloud::{
 };
 pub use wordpk::{submit_word_pk, WordPkSubmission};
 pub use words::bucket_words;
+pub use wrongnote::{
+    submit_wrong_question, wrong_kill_paper, wrong_knowledge, wrong_pending, wrong_subjects,
+    KillPaper, WrongAnswer, WrongCleanup, WrongKnowledge, WrongQuery, WrongQuestion, WrongSubject,
+};
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
