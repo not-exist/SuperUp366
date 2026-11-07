@@ -37,6 +37,9 @@ pub fn app(state: AppState) -> tauri::Builder<tauri::Wry> {
             commands::system::cache_clear,
             commands::wordpk::wordpk_preview,
             commands::wordpk::wordpk_submit,
+            commands::readaloud::readaloud_get,
+            commands::readaloud::readaloud_upload,
+            commands::readaloud::readaloud_submit,
         ])
 }
 
