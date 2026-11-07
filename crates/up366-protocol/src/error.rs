@@ -25,6 +25,15 @@ pub enum ProtocolError {
     #[error("decode error: {0}")]
     Decode(String),
 
+    /// The caller supplied a request this adapter cannot build correctly.
+    #[error("invalid request: {0}")]
+    Invalid(String),
+
+    /// The feature exists upstream but is not enabled in this build yet,
+    /// because its payload shape is not confirmed.
+    #[error("unsupported: {0}")]
+    Unsupported(String),
+
     /// The caller is not (or no longer) authenticated.
     #[error("authentication error: {0}")]
     Auth(String),
@@ -53,6 +62,8 @@ impl ProtocolError {
             }
             ProtocolError::Transport(message) => DomainError::Network(message),
             ProtocolError::Decode(message) => DomainError::ProtocolDrift(message),
+            ProtocolError::Invalid(message) => DomainError::Invalid(message),
+            ProtocolError::Unsupported(message) => DomainError::Unsupported(message),
             ProtocolError::Auth(message) => DomainError::AuthFailed(message),
         }
     }
