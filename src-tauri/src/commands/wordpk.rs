@@ -96,7 +96,7 @@ fn as_json_or_str(value: Option<&serde_json::Value>) -> Option<serde_json::Value
 ///
 /// Deliberately does not submit: the caller shows this and asks. A one-shot
 /// token is returned so the submit step cannot be replayed.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn wordpk_preview(
     account_id: String,
     job_id: String,
@@ -137,7 +137,7 @@ pub async fn wordpk_preview(
 /// The token is consumed first, so a double click or a stale retry fails
 /// without touching the server. The bucket is re-read at submit time so the
 /// submitted words are the words the server still returns.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn wordpk_submit(
     confirm_token: String,
     answers: Vec<WordPkAnswer>,

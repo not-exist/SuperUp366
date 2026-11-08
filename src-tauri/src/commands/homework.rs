@@ -53,7 +53,7 @@ struct JobIds {
 /// The ids come from the cached job row and the stored account, so the front
 /// end never has to know the `contentId` rule: the job id is never what the
 /// endpoint wants.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn answer_get(
     account_id: String,
     job_id: String,

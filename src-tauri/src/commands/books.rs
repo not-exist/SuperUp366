@@ -45,7 +45,7 @@ pub struct BookDetailView {
 }
 
 /// The student's shelf.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn books_list(
     account_id: String,
     state: tauri::State<'_, AppState>,
@@ -66,7 +66,7 @@ pub async fn books_list(
 }
 
 /// One book with its chapter list.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn book_detail(
     account_id: String,
     book_id: String,

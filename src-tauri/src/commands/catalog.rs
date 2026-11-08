@@ -24,7 +24,7 @@ pub struct JobFilter {
 }
 
 /// The full course list, with the class label already split out.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn courses_list(
     account_id: String,
     state: tauri::State<'_, AppState>,
@@ -43,7 +43,7 @@ pub async fn courses_list(
 /// Every course is fetched in upstream order and its jobs appended in the order
 /// the server returned them: the list is never grouped by class and never
 /// re-sorted. A job that appears in two classes stays two rows.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn jobs_list(
     account_id: String,
     refresh: Option<bool>,

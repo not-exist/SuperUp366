@@ -68,7 +68,7 @@ pub struct WrongFilter {
 }
 
 /// The subject list, used to fill the picker.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn wrongnotes_subjects(
     account_id: String,
     state: tauri::State<'_, AppState>,
@@ -88,7 +88,7 @@ pub async fn wrongnotes_subjects(
 }
 
 /// Knowledge points for the selected subject.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn wrongnotes_knowledge(
     account_id: String,
     filter: WrongFilter,
@@ -109,7 +109,7 @@ pub async fn wrongnotes_knowledge(
 }
 
 /// The questions still to clear.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn wrongnotes_pending(
     account_id: String,
     filter: WrongFilter,
@@ -152,7 +152,7 @@ pub struct CleanupPreviewView {
 ///
 /// No request is sent: the questions come from the caller's selection, and the
 /// only network call is the knowledge lookup the UI already made.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn wrongnotes_preview(
     account_id: String,
     question_ids: Vec<String>,
@@ -205,7 +205,7 @@ pub struct CleanupRunView {
 ///
 /// Serial by construction, one submission per question, and it stops before
 /// sending anything while the granularity is unconfirmed.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn wrongnotes_cleanup(
     confirm_token: String,
     state: tauri::State<'_, AppState>,

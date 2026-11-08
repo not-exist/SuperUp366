@@ -42,7 +42,7 @@ fn account_view(
 }
 
 /// List every known account, most recently used first.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn accounts_list(state: tauri::State<'_, AppState>) -> CommandResult<Vec<AccountView>> {
     let active = state.active_id();
     let mut views = Vec::new();
@@ -57,7 +57,7 @@ pub async fn accounts_list(state: tauri::State<'_, AppState>) -> CommandResult<V
 ///
 /// The password is used for exactly one upstream call and is then dropped: the
 /// returned session holds a TGT and cookies, never the password.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn account_login(
     username: String,
     password: String,
@@ -131,7 +131,7 @@ pub async fn account_login(
 ///
 /// Restores the stored session, so no password is needed. A missing or expired
 /// session surfaces as an auth error naming the account.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn account_switch(
     account_id: String,
     state: tauri::State<'_, AppState>,
@@ -167,7 +167,7 @@ pub async fn account_switch(
 }
 
 /// Forget an account: drop its runtime, session and cached data.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn account_logout(
     account_id: String,
     state: tauri::State<'_, AppState>,

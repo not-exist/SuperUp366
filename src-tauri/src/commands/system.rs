@@ -36,7 +36,7 @@ impl Default for SettingsView {
 const SETTINGS_KEY: &str = "app.settings";
 
 /// Read settings, falling back to defaults on a missing or unreadable value.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn settings_get(state: tauri::State<'_, AppState>) -> CommandResult<SettingsView> {
     let raw = state
         .db
@@ -51,7 +51,7 @@ pub async fn settings_get(state: tauri::State<'_, AppState>) -> CommandResult<Se
 }
 
 /// Persist settings.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn settings_update(
     settings: SettingsView,
     state: tauri::State<'_, AppState>,
@@ -73,7 +73,7 @@ pub async fn settings_update(
 /// Drop cached courses and jobs so the next list request refetches.
 ///
 /// Account metadata and stored sessions are deliberately untouched.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn cache_clear(state: tauri::State<'_, AppState>) -> CommandResult<()> {
     let account_id = state.active_id().ok_or_else(AppError::auth_required)?;
     state

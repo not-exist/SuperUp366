@@ -79,7 +79,7 @@ pub struct RecordingUpload {
 /// Slots come from the paper XML, which the sync layer parses; until that
 /// exists this reports an honest empty list rather than a guessed one, and the
 /// caller is told why.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn readaloud_get(
     account_id: String,
     job_id: String,
@@ -101,7 +101,7 @@ pub async fn readaloud_get(
 ///
 /// Returns the validated local file: the caller shows the slot as "ready", not
 /// "uploaded", because the OSS transfer is not wired yet. Nothing is sent.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn readaloud_upload(
     account_id: String,
     _job_id: String,
@@ -127,7 +127,7 @@ pub async fn readaloud_upload(
 ///
 /// `dry_run` defaults to true. Passing `false` reaches the guarded protocol
 /// layer, which still refuses while the payload shape is unconfirmed.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub async fn readaloud_submit(
     account_id: String,
     job_id: String,
