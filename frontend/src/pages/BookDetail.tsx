@@ -1,18 +1,18 @@
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/commands";
+import type { BookChapter } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/LoadingState";
 import { ArrowLeftIcon } from "../components/Icons";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAccount } from "../hooks/account";
-import {
-  formatDateTime,
-  isOverdue,
-  jobPath,
-  percent,
-} from "../utils";
+import { formatDateTime, isOverdue, percent } from "../utils";
+
+/** Rows rendered per chapter before the "show more" button appears. */
+const CHAPTER_PAGE_SIZE = 100;
 
 export function BookDetail() {
   const { bookId } = useParams();
@@ -60,13 +60,15 @@ export function BookDetail() {
             <div>
               <h2 className="book-name">{detail.data.name}</h2>
               <p className="book-meta">
-                {detail.data.subject}
+                {detail.data.is_2025_reader ? "2025 阅读器" : "同步练习"}
                 {detail.data.teacher_name
                   ? ` · ${detail.data.teacher_name}`
                   : ""}
               </p>
               <p className="book-meta">
-                已完成 {detail.data.progress}/{detail.data.total}
+                {detail.data.total > 0
+                  ? `已完成 ${detail.data.progress}/${detail.data.total}`
+                  : "暂无作业"}
               </p>
               <div className="progress-track" aria-hidden="true">
                 <div
@@ -79,53 +81,76 @@ export function BookDetail() {
             </div>
           </section>
 
-          {detail.data.chapters.map((chapter) => (
-            <section key={chapter.chapter_id} className="chapter">
-              <h3 className="chapter-title">{chapter.title}</h3>
-              {chapter.jobs.length === 0 ? (
-                <p className="field-hint">本章暂无作业。</p>
-              ) : (
-                <>
-                  <div className="job-list-head job-list-head--book" aria-hidden="true">
-                    <span>作业</span>
-                    <span>状态</span>
-                    <span>分数</span>
-                    <span>截止时间</span>
-                  </div>
-                  {chapter.jobs.map((job) => {
-                    const overdue =
-                      job.status.kind !== "finished" &&
-                      isOverdue(job.deadline);
-                    return (
-                      <Link
-                        key={job.job_id}
-                        to={jobPath(job)}
-                        className="job-row job-row--book"
-                      >
-                        <span className="job-name">
-                          <span className="job-name-main">{job.name}</span>
-                          {job.read_aloud && (
-                            <span className="job-sub">含朗读</span>
-                          )}
-                        </span>
-                        <StatusBadge kind={job.status.kind} />
-                        <span className="job-score">
-                          {job.score != null ? `${job.score} 分` : "—"}
-                        </span>
-                        <span
-                          className={`job-deadline${overdue ? " job-deadline--overdue" : ""}`}
-                        >
-                          {formatDateTime(job.deadline)}
-                        </span>
-                      </Link>
-                    );
-                  })}
-                </>
-              )}
-            </section>
-          ))}
+          {detail.data.chapters.length === 0 ? (
+            <EmptyState
+              title="暂无章节"
+              description="这本书还没有可显示的章节。"
+            />
+          ) : (
+            detail.data.chapters.map((chapter) => (
+              <ChapterSection key={chapter.chapter_id} chapter={chapter} />
+            ))
+          )}
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * One top-level chapter. Rows are not links: a book page's task id is not a
+ * job id, so the answer route would fail to find it in the job cache.
+ */
+function ChapterSection({ chapter }: { chapter: BookChapter }) {
+  const [limit, setLimit] = useState(CHAPTER_PAGE_SIZE);
+  const jobs = chapter.jobs ?? [];
+  const visible = jobs.slice(0, limit);
+
+  return (
+    <section className="chapter">
+      <h3 className="chapter-title">{chapter.title}</h3>
+      {jobs.length === 0 ? (
+        <p className="field-hint">本章暂无作业。</p>
+      ) : (
+        <>
+          <div className="job-list-head job-list-head--book" aria-hidden="true">
+            <span>作业</span>
+            <span>状态</span>
+            <span>分数</span>
+            <span>截止时间</span>
+          </div>
+          {visible.map((job) => {
+            const overdue =
+              job.status.kind !== "finished" && isOverdue(job.deadline);
+            return (
+              <div key={job.job_id} className="job-row job-row--book">
+                <span className="job-name">
+                  <span className="job-name-main">{job.name}</span>
+                  {job.read_aloud && <span className="job-sub">含朗读</span>}
+                </span>
+                <StatusBadge kind={job.status.kind} />
+                <span className="job-score">
+                  {job.score != null ? `${job.score} 分` : "—"}
+                </span>
+                <span
+                  className={`job-deadline${overdue ? " job-deadline--overdue" : ""}`}
+                >
+                  {formatDateTime(job.deadline)}
+                </span>
+              </div>
+            );
+          })}
+          {jobs.length > limit && (
+            <button
+              type="button"
+              className="button button--ghost button--sm chapter-more"
+              onClick={() => setLimit((current) => current + CHAPTER_PAGE_SIZE)}
+            >
+              显示更多（还有 {jobs.length - limit} 项）
+            </button>
+          )}
+        </>
+      )}
+    </section>
   );
 }

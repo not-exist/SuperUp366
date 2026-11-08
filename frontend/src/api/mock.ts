@@ -182,27 +182,21 @@ const bookSeeds: Book[] = [
     name: "英语必修 第一册",
     subject: "英语",
     cover_url: null,
-    progress: 8,
-    total: 24,
-    status: "active",
+    is_2025_reader: false,
   },
   {
     book_id: "book-2",
     name: "英语必修 第二册",
     subject: "英语",
     cover_url: null,
-    progress: 3,
-    total: 20,
-    status: "active",
+    is_2025_reader: false,
   },
   {
     book_id: "book-3",
     name: "高中英语阅读进阶",
     subject: "英语",
     cover_url: null,
-    progress: 12,
-    total: 12,
-    status: "finished",
+    is_2025_reader: true,
   },
 ];
 
@@ -227,17 +221,23 @@ function bookJob(bookId: string, chapterIndex: number, jobIndex: number): BookJo
   };
 }
 
-const books: BookDetail[] = bookSeeds.map((book, bookIndex) => ({
-  ...book,
-  teacher_name: courseSeeds[bookIndex % courseSeeds.length].teacher_name,
-  chapters: bookChapterTitles.map((title, chapterIndex) => ({
+const books: BookDetail[] = bookSeeds.map((book, bookIndex) => {
+  const chapters = bookChapterTitles.map((title, chapterIndex) => ({
     chapter_id: `${book.book_id}-ch-${chapterIndex + 1}`,
     title,
     jobs: Array.from({ length: 4 }, (_, jobIndex) =>
       bookJob(book.book_id, chapterIndex, jobIndex),
     ),
-  })),
-}));
+  }));
+  const jobs = chapters.flatMap((chapter) => chapter.jobs);
+  return {
+    ...book,
+    progress: jobs.filter((job) => job.status.kind === "finished").length,
+    total: jobs.length,
+    teacher_name: courseSeeds[bookIndex % courseSeeds.length].teacher_name,
+    chapters,
+  };
+});
 
 // --- answers ----------------------------------------------------------
 
@@ -473,9 +473,7 @@ export async function handleMock(
         name: book.name,
         subject: book.subject,
         cover_url: book.cover_url,
-        progress: book.progress,
-        total: book.total,
-        status: book.status,
+        is_2025_reader: book.is_2025_reader,
       }));
     }
 

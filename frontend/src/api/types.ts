@@ -59,16 +59,14 @@ export interface JobRow {
   read_aloud: boolean;
 }
 
-export type BookStatus = "active" | "finished";
-
+/** One shelf entry. No progress here: that needs the whole book tree. */
 export interface Book {
   book_id: string;
   name: string;
   subject: string;
   cover_url: string | null;
-  progress: number;
-  total: number;
-  status: BookStatus;
+  /** `packType == 9` books use the newer reader. */
+  is_2025_reader: boolean;
 }
 
 export interface BookJob {
@@ -88,6 +86,10 @@ export interface BookChapter {
 }
 
 export interface BookDetail extends Book {
+  /** Pages whose task appears in the finished-task list. */
+  progress: number;
+  /** Pages that carry a task id. */
+  total: number;
   teacher_name: string | null;
   chapters: BookChapter[];
 }
@@ -332,6 +334,8 @@ export interface CommandMap {
         subject_id?: string;
         book_id?: string;
         knowledge_id?: string;
+        qtype_id?: string;
+        stage_id?: string;
       };
     };
     result: WrongKnowledge[];
@@ -343,6 +347,8 @@ export interface CommandMap {
         subject_id?: string;
         book_id?: string;
         knowledge_id?: string;
+        qtype_id?: string;
+        stage_id?: string;
       };
     };
     result: WrongNote[];

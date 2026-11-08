@@ -792,6 +792,10 @@ textarea {
   font-size: 15px;
 }
 
+.chapter-more {
+  margin-top: 10px;
+}
+
 /* --- answer view ---------------------------------------------------- */
 
 .answer-summary {

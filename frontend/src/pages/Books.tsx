@@ -5,7 +5,6 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/LoadingState";
 import { useAccount } from "../hooks/account";
-import { percent } from "../utils";
 
 export function Books() {
   const account = useAccount();
@@ -52,13 +51,7 @@ export function Books() {
               <span>
                 <span className="book-name">{book.name}</span>
                 <span className="book-meta">
-                  {book.subject} · 已完成 {book.progress}/{book.total}
-                </span>
-                <span className="progress-track" aria-hidden="true">
-                  <span
-                    className="progress-fill"
-                    style={{ width: `${percent(book.progress, book.total)}%` }}
-                  />
+                  {book.is_2025_reader ? "2025 阅读器" : "同步练习"}
                 </span>
               </span>
             </Link>
