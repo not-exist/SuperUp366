@@ -66,6 +66,34 @@ URL once with `?ticket=<st>` (or `&ticket=` when a query already exists).
 - `extParam` and `extParam.xotParam` are JSON strings that must be parsed twice.
 - Word PK marker: `xotParam.pkBucketId` present, or `wordpkPlayType` key exists.
 
+### The job list alone cannot answer "finished"
+
+The `course/job` rows observed on 2026-11-08 carry `extParam.taskStatus == 0`
+for every job and no `stuStatus` at all, so a resolver that trusts only those
+fields marks everything pending or expired. The authoritative rows come from
+`studytask-api /client/student/all/course/finish/job/v2`:
+
+- `data.finishedList` and `data.returnedList`; each row is keyed by
+  `studyTaskId`, which equals the job's `jobId` (never `contentId`).
+- The call is **account-wide**: it ignores `courseId` and returns the same rows
+  for every course, so fetch it once per refresh.
+- `extParam.taskScore` is the paper's full score, not the student's score; only
+  `finishedList[].score` may be shown as a result.
+
+## Books
+
+`book-api /client/books/tree` returns three flat arrays:
+
+- `chapters`: type 1 nodes with `id`, `parentId`, `name`.
+- `pages`: type 2 nodes with `name`, `parentId` (a chapter id) and `taskId`.
+- `tasks`: type 3 nodes with `id`, `parentId` (a chapter id), `taskType`.
+
+`page.taskId` is the `task.id` used by `/client/book/finished-task/list`;
+completion is the intersection of the two id sets. The shelf response carries
+no task counts and no display name for `subjectId` (it is a numeric id), so
+progress can only be computed after fetching the tree. Nested chapters are
+navigation only: a page belongs to its nearest top-level ancestor.
+
 ## Answer detail
 
 `data.paperInfo.paperData` (paper XML), `data.paperInfo.answerData` (correct
@@ -84,6 +112,17 @@ the job's `contentId`; passing `jobId` yields empty `paperInfo`. v2 requires
 
 ## Wrong-answer book
 
+- `subject/list` returns an array; `subjectId` and `stageId` are **numbers**
+  (for example `303` / `3`), not strings.
+- `knowledge/list/v3` returns `data.{list,pager}` and **requires** `stageId`,
+  `subjectId`, `bookId`, `startTime`, `endTime`, `orderType`, `orderField`
+  and the pager; without the stage or the time range it answers `-1
+  param_missing`. Its columns are spelt `qTypeId` / `qTypeName`.
+- `student/question/show` requires `stageId`, `subjectId`, `bookId` (`"0"` means
+  all books; an empty string is rejected), `qtypeId`, `knowledgeId`, the time
+  range and the pager. It returns `paperData` / `answerData` /
+  `userAnswerData` plus a `list` of rows keyed by `questionId`; the stem and
+  answers are only in the XML, not in the row.
 - `questions/kill` is a **read** endpoint returning `pathPrefix` / `paperData` /
   `answerData` for the kill page.
 - `question/submit` is the only destructive call:

@@ -67,6 +67,12 @@ yields two rows.
 | `books_list` | `account_id` | `Book[]` |
 | `book_detail` | `account_id, book_id` | `BookDetail` (book + chapters + job rows) |
 
+`books_list` is shelf metadata only: a book's total task count needs the whole
+tree (megabytes for a large reader book), so it is fetched on the detail page.
+`book_detail` groups each page under its top-level chapter and derives
+`progress` / `total` from `finished-task/list`. Book rows are display-only:
+a page's `taskId` is not a job id, so the answer route cannot open it.
+
 ## Answers
 
 | Command | Args | Returns |
@@ -111,8 +117,8 @@ just in copy:
 | Command | Args | Returns |
 | --- | --- | --- |
 | `wrongnotes_subjects` | `account_id` | `WrongSubject[]` |
-| `wrongnotes_knowledge` | `account_id, filter{subject_id, book_id}` | `WrongKnowledge[]` |
-| `wrongnotes_pending` | `account_id, filter{subject_id, book_id, knowledge_id}` | `WrongNote[]` |
+| `wrongnotes_knowledge` | `account_id, filter{subject_id, book_id, stage_id?}` | `WrongKnowledge[]` |
+| `wrongnotes_pending` | `account_id, filter{subject_id, book_id, knowledge_id, qtype_id, stage_id?}` | `WrongNote[]` |
 | `wrongnotes_preview` | `account_id, question_ids` | `CleanupPreview` |
 | `wrongnotes_cleanup` | `confirm_token` | `CleanupRun` |
 
