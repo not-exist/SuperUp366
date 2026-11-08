@@ -9,7 +9,7 @@
 use serde::Serialize;
 use up366_protocol::{adapters, dto::BookTree};
 
-use crate::error::{AppError, CommandResult};
+use crate::error::CommandResult;
 use crate::session::AppState;
 
 /// One shelf entry.
@@ -50,10 +50,10 @@ pub async fn books_list(
     account_id: String,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<Vec<BookListItem>> {
-    let (_, client) = state.require_client(Some(&account_id))?;
+    let (account_id, client) = state.require_client(Some(&account_id))?;
     Ok(adapters::books(&client)
         .await
-        .map_err(AppError::from)?
+        .map_err(|error| state.session_error(&account_id, &client, error))?
         .iter()
         .map(|book| BookListItem {
             book_id: book.id().unwrap_or_default().to_owned(),
@@ -72,13 +72,13 @@ pub async fn book_detail(
     book_id: String,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<BookDetailView> {
-    let (_, client) = state.require_client(Some(&account_id))?;
+    let (account_id, client) = state.require_client(Some(&account_id))?;
     let book = adapters::book_info(&client, &book_id)
         .await
-        .map_err(AppError::from)?;
+        .map_err(|error| state.session_error(&account_id, &client, error))?;
     let tree = adapters::book_tree(&client, &book_id)
         .await
-        .map_err(AppError::from)?;
+        .map_err(|error| state.session_error(&account_id, &client, error))?;
 
     Ok(BookDetailView {
         book_id: book.id().unwrap_or_default().to_owned(),

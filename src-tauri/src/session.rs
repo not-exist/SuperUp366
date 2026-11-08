@@ -107,6 +107,11 @@ impl AppState {
             .get(&account_id)
             .map(|runtime| runtime.client.clone())
             .ok_or_else(crate::error::AppError::auth_required)?;
+        // A client already known to be rejected upstream must not be used for
+        // another request: the next answer would be the same dead-ticket error.
+        if client.is_expired() {
+            return Err(crate::error::AppError::auth_required());
+        }
         Ok((account_id, client))
     }
 
@@ -118,6 +123,26 @@ impl AppState {
     ) -> up366_store::Result<()> {
         let json = serde_json::to_string(session).unwrap_or_default();
         self.secrets.save(account_id, &json)
+    }
+
+    /// Convert an upstream failure into the error the UI sees.
+    ///
+    /// When the failure killed the session (the TGT was rejected and the ticket
+    /// exchange failed), the expiry is persisted first: that is what makes the
+    /// account switcher ask for a password on the next launch instead of
+    /// replaying the same dead ticket, and it replaces the raw upstream text
+    /// ("找不到tgt") with the stable `session_expired` code.
+    pub fn session_error(
+        &self,
+        account_id: &AccountId,
+        client: &Client,
+        error: up366_protocol::ProtocolError,
+    ) -> crate::error::AppError {
+        if client.is_expired() {
+            let _ = self.save_session(account_id, &client.session());
+            return crate::error::AppError::auth_required();
+        }
+        crate::error::AppError::from(error)
     }
 
     /// Forget an account: drop its runtime, session and cached data.
@@ -217,6 +242,38 @@ mod tests {
         let code = state.require_client(None).err().map(|error| error.code);
         assert_eq!(code, Some("session_expired"));
         assert!(state.secrets.load(&account).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_rejected_session_is_persisted_and_refused() {
+        let state = state().await;
+        let account = AccountId::from("acc-expired");
+        let client = Client::with_client_id("CID-3").unwrap();
+        state.install(
+            account.clone(),
+            client.clone(),
+            Session::new("alice", "TGT-1", "CID-3"),
+        );
+
+        // The protocol layer flips this flag when the ticket exchange fails.
+        client.mark_expired();
+        let error = state.session_error(
+            &account,
+            &client,
+            up366_protocol::ProtocolError::Api {
+                code: -23,
+                message: "找不到tgt".into(),
+            },
+        );
+        assert_eq!(error.code, "session_expired");
+
+        // The next launch reads the flag from the credential store, and this
+        // run refuses to reuse the dead client.
+        let stored: Session =
+            serde_json::from_str(&state.secrets.load(&account).unwrap().unwrap()).unwrap();
+        assert!(stored.is_expired());
+        let code = state.require_client(None).err().map(|error| error.code);
+        assert_eq!(code, Some("session_expired"));
     }
 
     #[tokio::test]

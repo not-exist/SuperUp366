@@ -73,7 +73,7 @@ pub async fn answer_get(
 
     let detail = adapters::answer_detail(&client, &params)
         .await
-        .map_err(AppError::from)?;
+        .map_err(|error| state.session_error(&account_id, &client, error))?;
 
     Ok(build_view(job_id, ids.content_id, &detail))
 }

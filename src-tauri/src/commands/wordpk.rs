@@ -108,7 +108,7 @@ pub async fn wordpk_preview(
 
     round.words = adapters::bucket_words(&client, &round.bucket_id)
         .await
-        .map_err(AppError::from)?;
+        .map_err(|error| state.session_error(&active, &client, error))?;
     if round.words.is_empty() {
         return Err(AppError::new("api_error", "词库为空"));
     }
@@ -168,7 +168,7 @@ pub async fn wordpk_submit(
 
     let words = adapters::bucket_words(&client, &bucket_id)
         .await
-        .map_err(AppError::from)?;
+        .map_err(|error| state.session_error(&account_id, &client, error))?;
     let (correct, wrong) = split_words(&words, &answers)?;
 
     // The score is the number of correct words; send exactly that.
@@ -183,7 +183,7 @@ pub async fn wordpk_submit(
 
     let data = adapters::submit_word_pk(&client, &submission)
         .await
-        .map_err(AppError::from)?;
+        .map_err(|error| state.session_error(&account_id, &client, error))?;
 
     Ok(WordPkResult {
         ok: !data.is_null(),

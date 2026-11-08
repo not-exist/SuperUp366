@@ -350,7 +350,20 @@ impl Client {
                 let ticket = match self.service_ticket(url).await {
                     Ok(ticket) => ticket,
                     Err(error) => {
-                        self.mark_expired_if_needed(&error);
+                        // Any business rejection here means the SSO host would
+                        // not trade this TGT for a ticket. The exact code is
+                        // not worth matching ("找不到tgt" comes back under more
+                        // than one), so treat the session as dead.
+                        if matches!(
+                            error,
+                            ProtocolError::Api { .. }
+                                | ProtocolError::Http {
+                                    status: 401 | 403,
+                                    ..
+                                }
+                        ) {
+                            self.mark_expired();
+                        }
                         return Err(error);
                     }
                 };
@@ -367,7 +380,12 @@ impl Client {
                 }
                 result
             }
-            Err(error) => Err(error),
+            Err(error) => {
+                // A business host can answer "tgt not found" without going
+                // through the ticket fallback (only -21/-22 trigger it).
+                self.mark_expired_if_needed(&error);
+                Err(error)
+            }
         }
     }
 
@@ -1081,6 +1099,47 @@ mod tests {
         first.assert_hits(1);
         replay.assert_hits(1);
         ticket.assert_hits(1);
+        assert!(client.is_expired());
+    }
+
+    #[tokio::test]
+    async fn a_business_host_reporting_no_tgt_marks_the_session_expired() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST)
+                .path("/client/course/list-of-student/v2")
+                .matches(without_ticket);
+            then.status(200)
+                .json_body(json!({ "result": { "code": -23, "msg": "找不到tgt" } }));
+        });
+
+        let client = client(&server);
+        let error = client.call(get("courses").unwrap(), &[]).await.unwrap_err();
+
+        assert!(matches!(error, ProtocolError::Api { code: -23, .. }));
+        assert!(client.is_expired());
+    }
+
+    #[tokio::test]
+    async fn a_rejected_ticket_exchange_marks_the_session_expired() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST)
+                .path("/client/course/list-of-student/v2")
+                .matches(without_ticket);
+            then.status(200)
+                .json_body(json!({ "result": { "code": -21, "msg": "没有登录" } }));
+        });
+        server.mock(|when, then| {
+            when.method(POST).path("/v1/serviceTicket");
+            then.status(200)
+                .json_body(json!({ "result": { "code": -4, "msg": "找不到tgt" } }));
+        });
+
+        let client = client(&server);
+        let error = client.call(get("courses").unwrap(), &[]).await.unwrap_err();
+
+        assert!(error.to_string().contains("找不到tgt"));
         assert!(client.is_expired());
     }
 }

@@ -21,7 +21,7 @@ pub fn account_id_for(username: &str) -> AccountId {
 fn account_view(
     record: &up366_store::AccountRecord,
     active: Option<&AccountId>,
-    session_present: bool,
+    session_valid: bool,
 ) -> AccountView {
     let username = record
         .username
@@ -36,7 +36,7 @@ fn account_view(
         school_name: String::new(),
         username,
         active: active == Some(&record.id),
-        session_valid: session_present && record.status != "needs_reauth",
+        session_valid: session_valid && record.status != "needs_reauth",
         expires_at: None,
     }
 }
@@ -47,8 +47,17 @@ pub async fn accounts_list(state: tauri::State<'_, AppState>) -> CommandResult<V
     let active = state.active_id();
     let mut views = Vec::new();
     for record in state.db.accounts().list().await.map_err(storage_error)? {
-        let session_present = matches!(state.secrets.load(&record.id), Ok(Some(_)));
-        views.push(account_view(&record, active.as_ref(), session_present));
+        // An expired session stays on disk so the account is not forgotten,
+        // but it must not be offered as usable.
+        let session_valid = state
+            .secrets
+            .load(&record.id)
+            .ok()
+            .flatten()
+            .and_then(|json| serde_json::from_str::<Session>(&json).ok())
+            .map(|session| !session.is_expired())
+            .unwrap_or(false);
+        views.push(account_view(&record, active.as_ref(), session_valid));
     }
     Ok(views)
 }
@@ -152,6 +161,11 @@ pub async fn account_switch(
         .ok_or_else(AppError::auth_required)?;
     let session: Session = serde_json::from_str(&session_json)
         .map_err(|error| AppError::new("storage_error", format!("会话数据损坏: {error}")))?;
+    // The stored ticket was rejected upstream on an earlier run: require the
+    // password again instead of installing a client that can only fail.
+    if session.is_expired() {
+        return Err(AppError::auth_required());
+    }
 
     let client = Client::with_session(session.clone()).map_err(AppError::from)?;
     state.install(account_id.clone(), client, session.clone());

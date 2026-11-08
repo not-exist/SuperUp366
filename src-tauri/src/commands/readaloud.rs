@@ -134,7 +134,7 @@ pub async fn readaloud_submit(
     dry_run: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<ReadAloudPreviewView> {
-    let (_, client) = state.require_client(Some(&account_id))?;
+    let (account_id, client) = state.require_client(Some(&account_id))?;
     let dry_run = dry_run.unwrap_or(true);
 
     let task: ReadAloudTaskView = serde_json::from_value(serde_json::json!({
@@ -158,7 +158,7 @@ pub async fn readaloud_submit(
 
     submit_readaloud(&client, &task, false)
         .await
-        .map_err(AppError::from)?;
+        .map_err(|error| state.session_error(&account_id, &client, error))?;
     Ok(ReadAloudPreviewView {
         job_id: task.job_id,
         title: task.title,

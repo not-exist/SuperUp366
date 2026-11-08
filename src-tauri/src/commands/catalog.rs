@@ -7,7 +7,7 @@ use regex::Regex;
 use serde::Deserialize;
 use up366_protocol::{adapters, dto::Course};
 
-use crate::error::{AppError, CommandResult};
+use crate::error::CommandResult;
 use crate::session::AppState;
 use crate::state::{CourseView, JobView};
 
@@ -29,8 +29,10 @@ pub async fn courses_list(
     account_id: String,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<Vec<CourseView>> {
-    let (_, client) = state.require_client(Some(&account_id))?;
-    let courses = adapters::courses(&client).await.map_err(AppError::from)?;
+    let (account_id, client) = state.require_client(Some(&account_id))?;
+    let courses = adapters::courses(&client)
+        .await
+        .map_err(|error| state.session_error(&account_id, &client, error))?;
     Ok(courses
         .iter()
         .enumerate()
@@ -50,9 +52,11 @@ pub async fn jobs_list(
     filter: Option<JobFilter>,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<Vec<JobView>> {
-    let (_, client) = state.require_client(Some(&account_id))?;
+    let (account_id, client) = state.require_client(Some(&account_id))?;
     let _ = refresh;
-    let courses = adapters::courses(&client).await.map_err(AppError::from)?;
+    let courses = adapters::courses(&client)
+        .await
+        .map_err(|error| state.session_error(&account_id, &client, error))?;
 
     let mut rows: Vec<JobView> = Vec::new();
     for (index, course) in courses.iter().enumerate() {
@@ -61,9 +65,14 @@ pub async fn jobs_list(
         };
         let view = course_view(course, index);
 
-        // One course failing must not empty the whole list.
-        let Ok(jobs) = adapters::jobs(&client, course_id).await else {
-            continue;
+        // One course failing must not empty the whole list, but a rejected
+        // session is not a course failure: stop and ask for the password.
+        let jobs = match adapters::jobs(&client, course_id).await {
+            Ok(jobs) => jobs,
+            Err(error) if client.is_expired() => {
+                return Err(state.session_error(&account_id, &client, error));
+            }
+            Err(_) => continue,
         };
         for job in &jobs {
             let state = crate::state::resolve_job_state(

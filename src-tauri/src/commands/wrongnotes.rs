@@ -73,10 +73,10 @@ pub async fn wrongnotes_subjects(
     account_id: String,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<Vec<WrongSubjectView>> {
-    let (_, client) = state.require_client(Some(&account_id))?;
+    let (account_id, client) = state.require_client(Some(&account_id))?;
     Ok(adapters::wrong_subjects(&client)
         .await
-        .map_err(AppError::from)?
+        .map_err(|error| state.session_error(&account_id, &client, error))?
         .into_iter()
         .map(|subject| WrongSubjectView {
             subject_id: subject.subject_id,
@@ -94,7 +94,7 @@ pub async fn wrongnotes_knowledge(
     filter: WrongFilter,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<Vec<WrongKnowledgeView>> {
-    let (_, client) = state.require_client(Some(&account_id))?;
+    let (account_id, client) = state.require_client(Some(&account_id))?;
     let query = WrongQuery {
         subject_id: filter.subject_id,
         book_id: filter.book_id,
@@ -102,7 +102,7 @@ pub async fn wrongnotes_knowledge(
     };
     Ok(adapters::wrong_knowledge(&client, &query)
         .await
-        .map_err(AppError::from)?
+        .map_err(|error| state.session_error(&account_id, &client, error))?
         .into_iter()
         .map(knowledge_view)
         .collect())
@@ -115,7 +115,7 @@ pub async fn wrongnotes_pending(
     filter: WrongFilter,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<Vec<WrongQuestionView>> {
-    let (_, client) = state.require_client(Some(&account_id))?;
+    let (account_id, client) = state.require_client(Some(&account_id))?;
     let query = WrongQuery {
         subject_id: filter.subject_id,
         book_id: filter.book_id,
@@ -124,7 +124,7 @@ pub async fn wrongnotes_pending(
     };
     Ok(adapters::wrong_pending(&client, &query)
         .await
-        .map_err(AppError::from)?
+        .map_err(|error| state.session_error(&account_id, &client, error))?
         .into_iter()
         .map(question_view)
         .collect())
