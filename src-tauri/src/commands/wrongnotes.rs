@@ -72,9 +72,13 @@ pub struct WrongFilter {
 /// page uses.
 const ARCHIVE_START: &str = "2010-01-01 00:00:00";
 
-/// Page sizes the wrong-note screens ask for, matching the H5 client.
+/// Page sizes the wrong-note screens ask for.
+///
+/// The H5 list shows ten questions per page, but this client is a cleanup tool:
+/// clearing a ten-row page only makes the next ten slide in, which looks like
+/// nothing happened. Ask for the whole knowledge point instead.
 const KNOWLEDGE_PAGE_SIZE: i64 = 100;
-const PENDING_PAGE_SIZE: i64 = 10;
+const PENDING_PAGE_SIZE: i64 = 200;
 
 impl WrongFilter {
     /// Knowledge rows for the selected subject.
@@ -543,7 +547,7 @@ mod tests {
         assert_eq!(query.start_time.as_deref(), Some("2010-01-01 00:00:00"));
         assert_eq!(query.end_time.as_deref(), Some("2026-11-08 23:59:59"));
         assert_eq!(query.page, Some(1));
-        assert_eq!(query.page_size, Some(10));
+        assert_eq!(query.page_size, Some(200));
     }
 
     #[test]

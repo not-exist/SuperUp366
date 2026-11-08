@@ -125,7 +125,7 @@ export function WrongNote() {
         <div>
           <h1 className="page-title">错题本</h1>
           <p className="page-subtitle">
-            选择学科与知识点，勾选未清理的错题后一键清理。
+            选择学科与知识点，会加载该知识点下的全部未清理错题。
           </p>
         </div>
       </header>
@@ -225,7 +225,7 @@ export function WrongNote() {
                 checked={allSelected}
                 onChange={toggleAll}
               />
-              <span>全选本页（{items.length} 题）</span>
+              <span>全选（{items.length} 题）</span>
             </label>
             <button
               type="button"
