@@ -141,12 +141,6 @@ export interface CleanupPreviewItem {
 export interface CleanupPreview {
   items: CleanupPreviewItem[];
   total: number;
-  /**
-   * False until per-question submission is confirmed against a real account.
-   * While false the run refuses to send, so the UI must say so instead of
-   * showing a submit button that silently does nothing.
-   */
-  granularity_confirmed: boolean;
   /** One-shot token for `wrongnotes_cleanup`. */
   confirm_token: string;
 }
@@ -354,7 +348,17 @@ export interface CommandMap {
     result: WrongNote[];
   };
   wrongnotes_preview: {
-    args: { account_id: string; question_ids: string[] };
+    args: {
+      account_id: string;
+      question_ids: string[];
+      filter: {
+        subject_id?: string;
+        book_id?: string;
+        knowledge_id?: string;
+        qtype_id?: string;
+        stage_id?: string;
+      };
+    };
     result: CleanupPreview;
   };
   wrongnotes_cleanup: { args: { confirm_token: string }; result: CleanupRun };

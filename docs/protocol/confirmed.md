@@ -134,6 +134,13 @@ seconds = ceil((endTime - startTime) / 1000)
 rightQstIds = comma-separated, or ""
 ```
 
+- One question per call is accepted; the official client's cleanup submits the
+  page in a single call, but per-question submissions work the same way.
+- `answerdata` is an `<elements>` document with one `<element id="...">` per
+  answered question, copied from the standard `answerData` shape.
+- `mark_datao` is an `<elements>` document: one `<element id="...">` holding
+  `<mark_data><score>..</score><result>1</result></mark_data>`.
+
 - Auth: cookies or a one-time `?ticket=`; `u3t` alone returns `-21`.
 
 ## Business codes

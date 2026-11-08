@@ -5,29 +5,24 @@
 //! individually.** Specifically:
 //!
 //! - the selection is previewed before anything is sent;
+//! - the preview copies each selected question's standard answer out of the
+//!   page the server returned, so a submission never carries an empty answer;
 //! - questions are submitted **serially**, never in parallel, so a failure
 //!   cannot cascade into a half-batch of duplicates;
 //! - each question's outcome is returned separately, so a partial batch can be
 //!   resumed instead of replayed (a replay would burn an attempt);
-//! - three consecutive failures stop the batch;
-//! - cancellation is checked between questions, never mid-request.
+//! - three consecutive failures stop the batch.
 //!
-//! The per-question granularity itself is not yet confirmed against the server
-//! (`docs/protocol/to-probe.md` §6). The commands are still wired so the flow
-//! can be exercised against a fixture, but the run reports
-//! `granularity_confirmed: false` and stops before sending until a real probe
-//! closes it.
+//! The official client submits one question per call; the granularity is no
+//! longer a gate (docs/protocol/to-probe.md section 6).
 
 use serde::{Deserialize, Serialize};
-use up366_protocol::adapters::{self, WrongCleanup, WrongKnowledge, WrongQuery, WrongQuestion};
+use up366_protocol::adapters::{
+    self, WrongAnswer, WrongCleanup, WrongKnowledge, WrongQuery, WrongQuestion,
+};
 
 use crate::error::{AppError, CommandResult};
 use crate::session::AppState;
-
-/// Whether the server accepts one question per cleanup call.
-///
-/// Stays false until `docs/protocol/to-probe.md` §6 is closed by a probe.
-const GRANULARITY_CONFIRMED: bool = false;
 
 /// One subject row.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -220,43 +215,84 @@ pub struct CleanupItemView {
 pub struct CleanupPreviewView {
     pub items: Vec<CleanupItemView>,
     pub total: usize,
-    /// False until per-question granularity is confirmed; the run stops early.
-    pub granularity_confirmed: bool,
     /// One-shot token for `wrongnotes_cleanup`.
     pub confirm_token: String,
 }
 
 /// Build the preview for the selected questions.
 ///
-/// No request is sent: the questions come from the caller's selection, and the
-/// only network call is the knowledge lookup the UI already made.
+/// This fetches the page the list came from and copies each selected question's
+/// standard answer into the token. No write is sent here.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn wrongnotes_preview(
     account_id: String,
     question_ids: Vec<String>,
+    filter: WrongFilter,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<CleanupPreviewView> {
-    let (active, _) = state.require_client(Some(&account_id))?;
+    let (active, client) = state.require_client(Some(&account_id))?;
     if question_ids.is_empty() {
         return Err(AppError::new("invalid_input", "没有选择任何错题"));
     }
+    if filter.subject_id.as_deref().unwrap_or_default().is_empty()
+        || filter
+            .knowledge_id
+            .as_deref()
+            .unwrap_or_default()
+            .is_empty()
+    {
+        return Err(AppError::new(
+            "invalid_input",
+            "清理前需要先选择学科与知识点",
+        ));
+    }
 
+    let stage_id = stage_id_for(&client, &filter)
+        .await
+        .map_err(|error| state.session_error(&active, &client, error))?;
+    let query = filter.pending_query(require_stage(stage_id)?, &today());
+    let page = adapters::wrong_pending_paper(&client, &query)
+        .await
+        .map_err(|error| state.session_error(&active, &client, error))?;
+
+    let mut items = Vec::with_capacity(question_ids.len());
+    let mut answers = Vec::with_capacity(question_ids.len());
+    for question_id in question_ids {
+        let title = page
+            .questions
+            .iter()
+            .find(|question| question.question_id == question_id)
+            .map(|question| question.title.clone())
+            .unwrap_or_else(|| question_id.clone());
+        items.push(CleanupItemView {
+            question_id: question_id.clone(),
+            title,
+        });
+        // A missing answer element stays in the list with empty XML so the
+        // run reports it as skipped instead of silently dropping it.
+        answers.push(
+            WrongAnswer::from_documents(&question_id, &page.paper_xml, &page.answer_xml)
+                .unwrap_or_else(|| WrongAnswer {
+                    question_id,
+                    answer_xml: String::new(),
+                    mark_xml: String::new(),
+                }),
+        );
+    }
+
+    let total = answers.len();
+    // The server measures the attempt; a failed clock read degrades to a 0
+    // start, which cleanup replaces with end - 1s.
+    let start_time = adapters::server_time(&client).await.unwrap_or(0);
     let confirm_token = state.confirmations.issue(crate::confirm::PendingWrite {
         account_id: active,
         operation: "wrongnote_cleanup",
-        payload: serde_json::json!({ "questionIds": question_ids }),
+        payload: serde_json::json!({ "items": answers, "startTime": start_time }),
     });
 
     Ok(CleanupPreviewView {
-        items: question_ids
-            .into_iter()
-            .map(|question_id| CleanupItemView {
-                title: question_id.clone(),
-                question_id,
-            })
-            .collect(),
-        total: 0,
-        granularity_confirmed: GRANULARITY_CONFIRMED,
+        items,
+        total,
         confirm_token,
     })
 }
@@ -281,14 +317,13 @@ pub struct CleanupRunView {
 
 /// Run the cleanup for the confirmed selection.
 ///
-/// Serial by construction, one submission per question, and it stops before
-/// sending anything while the granularity is unconfirmed.
+/// Serial by construction: one `question/submit` per selected question.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn wrongnotes_cleanup(
     confirm_token: String,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<CleanupRunView> {
-    let (account_id, _) = state.require_client(None)?;
+    let (account_id, client) = state.require_client(None)?;
 
     let pending = state
         .confirmations
@@ -302,87 +337,144 @@ pub async fn wrongnotes_cleanup(
             }
         })?;
 
-    let question_ids = question_ids_of(&pending)?;
-    if !GRANULARITY_CONFIRMED {
-        return Ok(CleanupRunView {
-            ok: false,
-            message:
-                "错题清理尚未对真实账号验证：服务端是否支持逐题提交未知，已停止，未发送任何请求"
-                    .to_owned(),
-            items: question_ids
-                .into_iter()
-                .map(|question_id| CleanupItemResult {
-                    question_id,
-                    state: "skipped".to_owned(),
-                    message: "等待协议确认".to_owned(),
-                })
-                .collect(),
-            cleared: 0,
-        });
+    let answers = answers_of(&pending)?;
+    if answers.is_empty() {
+        return Err(AppError::new("confirmation_expired", "确认内容不完整"));
     }
 
-    // Serial loop: one question at a time, stopping after three in a row fail.
-    let (_, client) = state.require_client(None)?;
-    let mut items = Vec::with_capacity(question_ids.len());
+    let uid = uid_for(&state, &account_id, &client).await?;
+    let end_time = adapters::server_time(&client)
+        .await
+        .unwrap_or_else(|_| up366_store::now_millis());
+    let start_time = start_time_of(&pending)
+        .filter(|start| *start > 0 && *start < end_time)
+        .unwrap_or(end_time - 1_000);
+
+    let total = answers.len();
+    let mut items = Vec::with_capacity(total);
     let mut cleared = 0usize;
     let mut consecutive_failures = 0usize;
-    let now = up366_store::now_millis();
+    let mut stopped = false;
 
-    for question_id in question_ids {
+    for answer in answers {
+        if stopped {
+            items.push(CleanupItemResult {
+                question_id: answer.question_id,
+                state: "skipped".to_owned(),
+                message: "连续失败，已停止".to_owned(),
+            });
+            continue;
+        }
+        if answer.answer_xml.is_empty() {
+            items.push(CleanupItemResult {
+                question_id: answer.question_id,
+                state: "skipped".to_owned(),
+                message: "服务端未提供该题的答案，已跳过".to_owned(),
+            });
+            continue;
+        }
+
         let cleanup = WrongCleanup {
-            uid: account_id.to_string(),
-            answer_xml: String::new(),
-            mark_xml: String::new(),
-            start_time: now,
-            end_time: now,
-            seconds: 0,
-            right_qst_ids: question_id.clone(),
+            uid: uid.clone(),
+            answer_xml: answer.answer_xml,
+            mark_xml: answer.mark_xml,
+            start_time,
+            end_time,
+            right_qst_ids: answer.question_id.clone(),
         };
         match adapters::submit_wrong_question(&client, &cleanup).await {
             Ok(_) => {
                 cleared += 1;
                 consecutive_failures = 0;
                 items.push(CleanupItemResult {
-                    question_id,
+                    question_id: answer.question_id,
                     state: "cleared".to_owned(),
                     message: "已清理".to_owned(),
+                });
+            }
+            Err(error) if error.is_session_expired() => {
+                return Err(state.session_error(&account_id, &client, error));
+            }
+            Err(up366_protocol::ProtocolError::Api { code: -13, .. }) => {
+                // Already submitted: retrying cannot succeed, and it must not
+                // count toward the stop threshold.
+                items.push(CleanupItemResult {
+                    question_id: answer.question_id,
+                    state: "skipped".to_owned(),
+                    message: "此前已提交，无法重复清理".to_owned(),
                 });
             }
             Err(error) => {
                 consecutive_failures += 1;
                 items.push(CleanupItemResult {
-                    question_id,
+                    question_id: answer.question_id,
                     state: "failed".to_owned(),
                     message: error.to_string(),
                 });
                 if consecutive_failures >= 3 {
-                    break;
+                    stopped = true;
                 }
             }
         }
     }
 
+    let ok = cleared == total;
+    let message = if ok {
+        format!("已清理 {cleared} 题")
+    } else {
+        format!("已清理 {cleared} 题，{} 题未完成", total - cleared)
+    };
     Ok(CleanupRunView {
-        ok: consecutive_failures < 3,
-        message: format!("已清理 {cleared} 题"),
+        ok,
+        message,
         items,
         cleared,
     })
 }
 
-/// Read the selected question ids back out of the pending write.
-fn question_ids_of(pending: &crate::confirm::PendingWrite) -> CommandResult<Vec<String>> {
+/// The numeric student id the write endpoint expects.
+///
+/// The local account id is the lower-cased username, not a uid. The stored
+/// profile normally has it; otherwise the user API is asked once per run.
+async fn uid_for(
+    state: &AppState,
+    account_id: &up366_core::AccountId,
+    client: &up366_protocol::Client,
+) -> CommandResult<String> {
+    if let Some(account) = state
+        .db
+        .accounts()
+        .get(account_id)
+        .await
+        .map_err(storage_error)?
+    {
+        if let Some(uid) = account.uid.filter(|uid| !uid.trim().is_empty()) {
+            return Ok(uid);
+        }
+    }
+    adapters::current_user(client)
+        .await
+        .map(|user| user.uid)
+        .map_err(|error| state.session_error(account_id, client, error))
+}
+
+/// Read the confirmed submissions back out of the pending write.
+fn answers_of(pending: &crate::confirm::PendingWrite) -> CommandResult<Vec<WrongAnswer>> {
+    let value = pending
+        .payload
+        .get("items")
+        .cloned()
+        .ok_or_else(|| AppError::new("confirmation_expired", "确认内容不完整"))?;
+    serde_json::from_value(value)
+        .map_err(|_| AppError::new("confirmation_expired", "确认内容不完整"))
+}
+
+/// When the preview opened, in server milliseconds.
+fn start_time_of(pending: &crate::confirm::PendingWrite) -> Option<i64> {
     pending
         .payload
-        .get("questionIds")
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(str::to_owned))
-                .collect()
-        })
-        .ok_or_else(|| AppError::new("confirmation_expired", "确认内容不完整"))
+        .get("startTime")
+        .and_then(serde_json::Value::as_i64)
 }
 
 fn knowledge_view(knowledge: WrongKnowledge) -> WrongKnowledgeView {
@@ -393,6 +485,10 @@ fn knowledge_view(knowledge: WrongKnowledge) -> WrongKnowledgeView {
         qtype_name: knowledge.qtype_name,
         wrong_count: knowledge.wrong_count,
     }
+}
+
+fn storage_error(error: up366_store::StoreError) -> AppError {
+    AppError::new("storage_error", error.to_string())
 }
 
 fn question_view(question: WrongQuestion) -> WrongQuestionView {
@@ -421,29 +517,10 @@ mod tests {
         let token = store.issue(crate::confirm::PendingWrite {
             account_id: account.clone(),
             operation: "wrongnote_cleanup",
-            payload: serde_json::json!({"questionIds": []}),
+            payload: serde_json::json!({"items": [], "startTime": 0}),
         });
         // An empty selection never reaches a submission: it produces no work.
         assert!(store.consume(&account, &token).is_ok());
-    }
-
-    #[test]
-    fn a_run_stops_before_sending_while_granularity_is_unconfirmed() {
-        // Confirmations are issued directly so no account needs to be active.
-        let store = crate::confirm::Confirmations::new();
-        let token = store.issue(crate::confirm::PendingWrite {
-            account_id: AccountId::from("acc"),
-            operation: "wrongnote_cleanup",
-            payload: serde_json::json!({"questionIds": ["Q1", "Q2"]}),
-        });
-
-        // Clearing without a confirmed granularity must be a no-op, and the
-        // token must still be consumable so the user can retry afterwards.
-        let granularity_confirmed = GRANULARITY_CONFIRMED;
-        assert!(!granularity_confirmed);
-        let pending = store.consume(&AccountId::from("acc"), &token).unwrap();
-        let ids = question_ids_of(&pending).unwrap();
-        assert_eq!(ids, vec!["Q1", "Q2"]);
     }
 
     #[test]
@@ -493,25 +570,34 @@ mod tests {
     }
 
     #[test]
-    fn question_ids_are_read_back_from_the_pending_write() {
+    fn answers_are_read_back_from_the_pending_write() {
         let pending = crate::confirm::PendingWrite {
             account_id: AccountId::from("acc"),
             operation: "wrongnote_cleanup",
-            payload: serde_json::json!({"questionIds": ["Q1", "Q2", "Q3"]}),
+            payload: serde_json::json!({
+                "items": [
+                    {"question_id": "Q1", "answer_xml": "<elements/>", "mark_xml": "<elements/>"},
+                    {"question_id": "Q2", "answer_xml": "", "mark_xml": ""}
+                ],
+                "startTime": 1_762_000_000_000i64
+            }),
         };
-        let ids = question_ids_of(&pending).unwrap();
-        assert_eq!(ids, vec!["Q1", "Q2", "Q3"]);
+        let answers = answers_of(&pending).unwrap();
+        assert_eq!(answers.len(), 2);
+        assert_eq!(answers[0].question_id, "Q1");
+        assert_eq!(answers[1].answer_xml, "");
+        assert_eq!(start_time_of(&pending), Some(1_762_000_000_000));
     }
 
     #[test]
-    fn a_pending_write_without_question_ids_is_rejected() {
+    fn a_pending_write_without_answers_is_rejected() {
         let pending = crate::confirm::PendingWrite {
             account_id: AccountId::from("acc"),
             operation: "wrongnote_cleanup",
             payload: serde_json::json!({"other": 1}),
         };
         assert_eq!(
-            question_ids_of(&pending).unwrap_err().code,
+            answers_of(&pending).unwrap_err().code,
             "confirmation_expired"
         );
     }

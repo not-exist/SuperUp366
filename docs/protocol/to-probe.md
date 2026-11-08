@@ -68,9 +68,9 @@ the real sort key (`beginTime` / `endTime` / `displayOrder` / `taskNo`).
 
 ## 6. Wrong-note cleanup granularity
 
-Whether `question/submit` accepts one question per call, or only a whole page.
-If only whole-page, the batch model degrades to one submission per page and the
-preview must say so.
+Resolved 2026-11-08: the official client submits one question per call. Cleanup
+sends one `question/submit` per selected question, with `rightQstIds` carrying
+that question's id.
 
 ## 7. Essay detection
 

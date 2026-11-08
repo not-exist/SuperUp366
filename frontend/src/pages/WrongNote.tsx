@@ -65,6 +65,12 @@ export function WrongNote() {
       api.previewWrongNoteCleanup(
         account.account_id,
         Array.from(selected),
+        {
+          subject_id: subjectId,
+          book_id: "",
+          knowledge_id: knowledgeId,
+          qtype_id: qtypeId,
+        },
       ),
     onSuccess: (data) => {
       setPreview(data);
@@ -78,7 +84,18 @@ export function WrongNote() {
     onSuccess: (data) => {
       setRun(data);
       setConfirmOpen(false);
+      setPreview(null);
+      setSelected(new Set());
+      // The counts on both pickers change with every cleared question.
       void pending.refetch();
+      void knowledge.refetch();
+      void subjects.refetch();
+    },
+    onError: () => {
+      // The token is single-use: the server consumed it even when the run
+      // failed, so the dialog must not offer the same token again.
+      setConfirmOpen(false);
+      setPreview(null);
     },
   });
 
@@ -261,8 +278,11 @@ export function WrongNote() {
       )}
 
       {run && (
-        <div className="banner banner--warning" role="status">
-          <strong>{run.ok ? "已完成" : "未执行"}</strong>
+        <div
+          className={`banner ${run.ok ? "banner--success" : "banner--info"}`}
+          role="status"
+        >
+          <strong>{run.ok ? "清理完成" : "部分完成"}</strong>
           <span>{run.message}</span>
         </div>
       )}
@@ -275,15 +295,13 @@ export function WrongNote() {
           setPreview(null);
         }}
         onConfirm={() => cleanupMutation.mutate()}
-        confirmLabel={preview?.granularity_confirmed ? "确认清理" : "生成预览"}
+        confirmLabel="确认清理"
         busy={cleanupMutation.isPending}
         summary={
           <>
             <p>
-              将处理 {preview?.items.length ?? 0} 道错题。
-              {preview?.granularity_confirmed
-                ? "逐题提交，失败可单独重试。"
-                : "当前未对真实账号验证服务端是否支持逐题提交，本次只会生成预览，不会发送任何请求。"}
+              将逐题提交 {preview?.items.length ?? 0} 道错题，提交成功后这些题目会从
+              错题本移除。失败可单独重试。
             </p>
             <ul className="summary-list">
               {(preview?.items ?? []).slice(0, 8).map((item) => (

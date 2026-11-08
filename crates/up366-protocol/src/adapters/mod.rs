@@ -8,6 +8,7 @@
 pub mod answers;
 pub mod books;
 pub mod catalog;
+pub mod profile;
 pub mod readaloud;
 pub mod wordpk;
 pub mod words;
@@ -16,6 +17,7 @@ pub mod wrongnote;
 pub use answers::{answer_detail, answer_detail_v1, answer_detail_v2, paper_detail};
 pub use books::{book_info, book_plan, book_tree, books};
 pub use catalog::{course_finished_jobs, courses, finished_tasks, job_info, jobs};
+pub use profile::{current_user, server_time, CurrentUser};
 pub use readaloud::{
     preview_submission, submit_readaloud, upload_ticket, ReadAloudSlot, ReadAloudTaskView,
     UploadTicket,
@@ -23,8 +25,9 @@ pub use readaloud::{
 pub use wordpk::{submit_word_pk, WordPkSubmission};
 pub use words::bucket_words;
 pub use wrongnote::{
-    submit_wrong_question, wrong_kill_paper, wrong_knowledge, wrong_pending, wrong_subjects,
-    KillPaper, WrongAnswer, WrongCleanup, WrongKnowledge, WrongQuery, WrongQuestion, WrongSubject,
+    submit_wrong_question, wrong_kill_paper, wrong_knowledge, wrong_pending, wrong_pending_paper,
+    wrong_subjects, KillPaper, PendingPaper, WrongAnswer, WrongCleanup, WrongKnowledge, WrongQuery,
+    WrongQuestion, WrongSubject,
 };
 
 use serde::de::DeserializeOwned;

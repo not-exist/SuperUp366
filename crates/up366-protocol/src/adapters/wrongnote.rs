@@ -6,9 +6,8 @@
 //!   answer to clear wrong questions.
 //! - `question/submit` is the only destructive call.
 //!
-//! Cleanup is inherently batch-shaped (one submission per question), and the
-//! granularity the server accepts is not confirmed (`docs/protocol/to-probe.md`
-//! §6). So the write path is deliberately built so that:
+//! Cleanup is inherently batch-shaped, and the official client submits one
+//! question per call. The write path is built so that:
 //!
 //! - a single question is the unit, and the caller decides how many to send;
 //! - nothing is retried automatically — `-13`/`-21` identify a burned or dead
@@ -98,6 +97,19 @@ struct WrongQuestionRow {
     user_answer: String,
 }
 
+/// One `question/show` page: the display rows and the XML the cleanup
+/// submission is built from.
+///
+/// The rows are only ids and labels; `answer_xml` is the standard answer
+/// document and `paper_xml` carries the per-question score used by the mark
+/// document. Both are kept verbatim so the submission can copy them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PendingPaper {
+    pub questions: Vec<WrongQuestion>,
+    pub paper_xml: String,
+    pub answer_xml: String,
+}
+
 /// The paper a student must answer to clear questions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct KillPaper {
@@ -179,9 +191,14 @@ pub async fn wrong_knowledge(client: &Client, query: &WrongQuery) -> Result<Vec<
 
 /// The questions still to clear for one knowledge point.
 pub async fn wrong_pending(client: &Client, query: &WrongQuery) -> Result<Vec<WrongQuestion>> {
+    Ok(wrong_pending_paper(client, query).await?.questions)
+}
+
+/// The same page, with the paper and answer documents the cleanup needs.
+pub async fn wrong_pending_paper(client: &Client, query: &WrongQuery) -> Result<PendingPaper> {
     let endpoint = endpoint("wrong_question_show")?;
     let data = client.call(endpoint, &query.form()).await?;
-    pending_from_data(data, endpoint.name)
+    pending_paper_from_data(data, endpoint.name)
 }
 
 /// Decode one `subject/list` payload: a bare array of rows.
@@ -203,19 +220,21 @@ fn knowledge_from_data(data: Option<Value>, endpoint: &str) -> Result<Vec<WrongK
         .collect()
 }
 
-/// Decode one `question/show` payload.
+/// Decode one `question/show` payload and keep the two paper documents.
 ///
 /// The list rows are the skeleton; stems and answers live in the three XML
 /// documents. A question the XML does not mention keeps an empty field rather
 /// than failing the page, so one odd row cannot hide the rest.
-fn pending_from_data(data: Option<Value>, endpoint: &str) -> Result<Vec<WrongQuestion>> {
+fn pending_paper_from_data(data: Option<Value>, endpoint: &str) -> Result<PendingPaper> {
     let mut object = codec::into_object(data, endpoint)?;
     let items = codec::take_list(&mut object, "list", endpoint)?;
-    let papers = PaperText::parse(&xml_field(&object, "paperData"));
-    let answers = PaperText::parse(&xml_field(&object, "answerData"));
+    let paper_xml = xml_field(&object, "paperData");
+    let answer_xml = xml_field(&object, "answerData");
+    let papers = PaperText::parse(&paper_xml);
+    let answers = PaperText::parse(&answer_xml);
     let user_answers = PaperText::parse(&xml_field(&object, "userAnswerData"));
 
-    items
+    let questions = items
         .into_iter()
         .map(|item| {
             let row: WrongQuestionRow = decode(item, endpoint)?;
@@ -234,7 +253,13 @@ fn pending_from_data(data: Option<Value>, endpoint: &str) -> Result<Vec<WrongQue
                 question_id: row.question_id,
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(PendingPaper {
+        questions,
+        paper_xml,
+        answer_xml,
+    })
 }
 
 /// One XML-bearing field as text; a missing or non-string value is empty.
@@ -261,6 +286,7 @@ enum Collecting {
     Nothing,
     Stem,
     Answer,
+    Score,
 }
 
 /// Text lifted out of the wrong-note XML payloads, keyed by question id.
@@ -272,6 +298,7 @@ enum Collecting {
 struct PaperText {
     stems: HashMap<String, String>,
     answers: HashMap<String, Vec<String>>,
+    scores: HashMap<String, String>,
 }
 
 impl PaperText {
@@ -304,6 +331,10 @@ impl PaperText {
                         collecting = Collecting::Answer;
                         buffer.clear();
                     }
+                    "question_score" => {
+                        collecting = Collecting::Score;
+                        buffer.clear();
+                    }
                     _ => {}
                 },
                 Event::End(end) => match end.name().local_name().into_inner() {
@@ -326,6 +357,15 @@ impl PaperText {
                                     .entry(id.clone())
                                     .or_default()
                                     .push(answer.to_owned());
+                            }
+                        }
+                        collecting = Collecting::Nothing;
+                    }
+                    "question_score" => {
+                        if let Some(id) = &question_id {
+                            let score = buffer.trim();
+                            if !score.is_empty() {
+                                parsed.scores.insert(id.clone(), score.to_owned());
                             }
                         }
                         collecting = Collecting::Nothing;
@@ -358,6 +398,11 @@ impl PaperText {
             .get(question_id)
             .map(|parts| parts.join("；"))
             .unwrap_or_default()
+    }
+
+    /// The full score of one question, as the paper declares it.
+    fn score(&self, question_id: &str) -> Option<&str> {
+        self.scores.get(question_id).map(String::as_str)
     }
 }
 
@@ -433,10 +478,96 @@ pub async fn wrong_kill_paper(client: &Client, query: &WrongQuery) -> Result<Kil
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WrongAnswer {
     pub question_id: String,
-    /// `<answerdata>` fragment for this question.
+    /// `answerdata`: one `<elements>` document holding this question's answer.
     pub answer_xml: String,
-    /// `<mark_datao>` fragment for this question.
+    /// `mark_datao`: one `<elements>` document marking the question correct.
     pub mark_xml: String,
+}
+
+impl WrongAnswer {
+    /// Build one submission from the standard answer document.
+    ///
+    /// The answer element is copied verbatim, so every question type keeps the
+    /// exact shape the server sent. A question the document does not mention
+    /// returns `None`: sending an empty answer would burn the attempt.
+    pub fn from_documents(question_id: &str, paper_xml: &str, answer_xml: &str) -> Option<Self> {
+        let element = element_xml(answer_xml, question_id)?;
+        let score = PaperText::parse(paper_xml)
+            .score(question_id)
+            .unwrap_or("0")
+            .to_owned();
+        Some(Self {
+            question_id: question_id.to_owned(),
+            answer_xml: format!("<elements>{element}</elements>"),
+            mark_xml: mark_xml(question_id, &score),
+        })
+    }
+}
+
+/// One `<element id="...">...</element>` block, byte for byte.
+///
+/// The answer document is server-authored XML; slicing the original keeps
+/// CDATA, attributes and question-type-specific children intact.
+fn element_xml(document: &str, question_id: &str) -> Option<String> {
+    if document.trim().is_empty() {
+        return None;
+    }
+
+    let mut reader = Reader::from_str(document);
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    loop {
+        let event_start = reader.buffer_position() as usize;
+        let event = reader.read_event().ok()?;
+        match event {
+            Event::Eof => return None,
+            Event::Start(tag) => {
+                if depth == 0 {
+                    if local_name(&tag) == "element"
+                        && attribute(&tag, "id").as_deref() == Some(question_id)
+                    {
+                        depth = 1;
+                        start = event_start;
+                    }
+                } else {
+                    depth += 1;
+                }
+            }
+            // A self-closing element carries no answer: treat it as absent.
+            Event::Empty(tag) => {
+                if depth == 0
+                    && local_name(&tag) == "element"
+                    && attribute(&tag, "id").as_deref() == Some(question_id)
+                {
+                    return None;
+                }
+            }
+            Event::End(_) => {
+                if depth > 0 {
+                    depth -= 1;
+                    if depth == 0 {
+                        let end = reader.buffer_position() as usize;
+                        return Some(document[start..end].to_owned());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The mark document for one correctly answered question.
+fn mark_xml(question_id: &str, score: &str) -> String {
+    let score = if score.trim().is_empty() {
+        "0"
+    } else {
+        score.trim()
+    };
+    format!(
+        "<elements><element id=\"{}\"><mark_data><score>{}</score><result>1</result></mark_data></element></elements>",
+        quick_xml::escape::escape(question_id),
+        quick_xml::escape::escape(score)
+    )
 }
 
 /// The payload of one cleanup submission.
@@ -450,7 +581,6 @@ pub struct WrongCleanup {
     pub mark_xml: String,
     pub start_time: i64,
     pub end_time: i64,
-    pub seconds: i64,
     pub right_qst_ids: String,
 }
 
@@ -653,7 +783,9 @@ mod tests {
             "answerData": "not xml at all <<<",
             "list": [{ "questionId": "Q1", "qTypeName": "选择题" }]
         });
-        let rows = pending_from_data(Some(data), "wrong_question_show").unwrap();
+        let rows = pending_paper_from_data(Some(data), "wrong_question_show")
+            .unwrap()
+            .questions;
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].question_id, "Q1");
         assert_eq!(rows[0].stem, "");
@@ -670,7 +802,9 @@ mod tests {
                 "userAnswer": "<element id=\"Q1\"><answers><answer id=\"1\"><![CDATA[B]]></answer></answers></element>"
             }]
         });
-        let rows = pending_from_data(Some(data), "wrong_question_show").unwrap();
+        let rows = pending_paper_from_data(Some(data), "wrong_question_show")
+            .unwrap()
+            .questions;
         assert_eq!(rows[0].stem, "题干");
         assert_eq!(rows[0].student_answer, "B");
     }
@@ -683,7 +817,6 @@ mod tests {
             mark_xml: "<elements/>".to_owned(),
             start_time: 1_000,
             end_time: 4_500,
-            seconds: 99, // must be ignored in favour of the derived value
             right_qst_ids: "Q1,Q2".to_owned(),
         };
         let fields = cleanup.form();
@@ -716,7 +849,6 @@ mod tests {
             mark_xml: "<m/>".to_owned(),
             start_time: 0,
             end_time: 1,
-            seconds: 1,
             right_qst_ids: String::new(),
         };
         let parsed: Value = serde_json::from_str(&cleanup.result_json()).unwrap();
@@ -743,7 +875,6 @@ mod tests {
             mark_xml: String::new(),
             start_time: 0,
             end_time: 0,
-            seconds: 0,
             right_qst_ids: String::new(),
         };
         // No server is needed: the guard fires before the transport.
@@ -751,6 +882,36 @@ mod tests {
             tokio_test(submit_wrong_question(&Client::new().unwrap(), &cleanup)),
             Err(ProtocolError::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn an_answer_element_is_copied_verbatim_for_the_selected_question() {
+        let answer_xml = r#"<elements><element id="Q1"><answers><answer id="1"><![CDATA[2]]></answer></answers></element><element id="Q2"><answers><answer id="1"><![CDATA[B]]></answer></answers></element></elements>"#;
+        let paper_xml = r#"<elements><element id="Q1"><question_score>5.0</question_score></element><element id="Q2"><question_score>10</question_score></element></elements>"#;
+
+        let answer = WrongAnswer::from_documents("Q2", paper_xml, answer_xml).unwrap();
+
+        assert_eq!(answer.question_id, "Q2");
+        assert_eq!(
+            answer.answer_xml,
+            r#"<elements><element id="Q2"><answers><answer id="1"><![CDATA[B]]></answer></answers></element></elements>"#
+        );
+        assert_eq!(
+            answer.mark_xml,
+            r#"<elements><element id="Q2"><mark_data><score>10</score><result>1</result></mark_data></element></elements>"#
+        );
+    }
+
+    #[test]
+    fn a_question_without_an_answer_element_is_skipped() {
+        let answer_xml = r#"<elements><element id="Q1"><answers><answer id="1"><![CDATA[2]]></answer></answers></element></elements>"#;
+        assert!(WrongAnswer::from_documents("Q2", "", answer_xml).is_none());
+    }
+
+    #[test]
+    fn a_self_closing_answer_element_is_skipped() {
+        let answer_xml = r#"<elements><element id="Q1"/></elements>"#;
+        assert!(WrongAnswer::from_documents("Q1", "", answer_xml).is_none());
     }
 
     fn tokio_test<F>(future: F) -> Result<Value>

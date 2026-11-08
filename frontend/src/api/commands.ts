@@ -78,8 +78,21 @@ export const api = {
         qtype_id: qtypeId,
       },
     }),
-  previewWrongNoteCleanup: (accountId: string, questionIds: string[]) =>
-    invokeCommand("wrongnotes_preview", { account_id: accountId, question_ids: questionIds }),
+  previewWrongNoteCleanup: (
+    accountId: string,
+    questionIds: string[],
+    filter: {
+      subject_id: string;
+      book_id: string;
+      knowledge_id: string;
+      qtype_id: string;
+    },
+  ) =>
+    invokeCommand("wrongnotes_preview", {
+      account_id: accountId,
+      question_ids: questionIds,
+      filter,
+    }),
   cleanupWrongNotes: (confirmToken: string) =>
     invokeCommand("wrongnotes_cleanup", { confirm_token: confirmToken }),
 

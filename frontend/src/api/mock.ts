@@ -309,6 +309,8 @@ let wrongNotes: WrongNote[] = Array.from({ length: 14 }, (_, index) => {
   };
 });
 
+let mockCleanupIds: string[] = [];
+
 // --- word pk ----------------------------------------------------------
 
 const wordSeeds: Array<[string, string, string]> = [
@@ -585,9 +587,9 @@ export async function handleMock(
       const selected = wrongNotes.filter((note) =>
         question_ids.includes(note.question_id),
       );
+      mockCleanupIds = selected.map((note) => note.question_id);
       return {
         total: selected.length,
-        granularity_confirmed: false,
         items: selected.map((note) => ({
           question_id: note.question_id,
           title: `${note.title} · ${note.question_type}`,
@@ -606,13 +608,22 @@ export async function handleMock(
         };
       }
       await sleep(320);
-      // Mirrors the backend: granularity is unconfirmed, so nothing is sent.
+      const cleared = wrongNotes.filter((note) =>
+        mockCleanupIds.includes(note.question_id),
+      );
+      wrongNotes = wrongNotes.filter(
+        (note) => !mockCleanupIds.includes(note.question_id),
+      );
+      mockCleanupIds = [];
       return {
-        ok: false,
-        message:
-          "错题清理尚未对真实账号验证：服务端是否支持逐题提交未知，已停止，未发送任何请求",
-        items: [],
-        cleared: 0,
+        ok: true,
+        message: `已清理 ${cleared.length} 题`,
+        items: cleared.map((note) => ({
+          question_id: note.question_id,
+          state: "cleared",
+          message: "已清理",
+        })),
+        cleared: cleared.length,
       } satisfies CleanupRun;
     }
 

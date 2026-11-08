@@ -119,15 +119,15 @@ just in copy:
 | `wrongnotes_subjects` | `account_id` | `WrongSubject[]` |
 | `wrongnotes_knowledge` | `account_id, filter{subject_id, book_id, stage_id?}` | `WrongKnowledge[]` |
 | `wrongnotes_pending` | `account_id, filter{subject_id, book_id, knowledge_id, qtype_id, stage_id?}` | `WrongNote[]` |
-| `wrongnotes_preview` | `account_id, question_ids` | `CleanupPreview` |
+| `wrongnotes_preview` | `account_id, question_ids, filter{subject_id, book_id, knowledge_id, qtype_id}` | `CleanupPreview` |
 | `wrongnotes_cleanup` | `confirm_token` | `CleanupRun` |
 
-`CleanupPreview.granularity_confirmed` decides what the run does. While it is
-`false`, `wrongnotes_cleanup` reports every question as `skipped` and sends
-nothing — the server's acceptance of one submission per question is unproven
-(`docs/protocol/to-probe.md` §6). Once confirmed, the run is serial, reports
-each question separately, and stops after three consecutive failures so a
-partial batch can be resumed rather than replayed.
+`wrongnotes_preview` fetches the same page the list came from and copies each
+selected question's standard answer into the one-shot token; nothing is sent
+yet. `wrongnotes_cleanup` then submits one `question/submit` per question, in
+series, with the numeric `uid` from the user profile and the server's clock.
+Each question is reported separately, and three consecutive failures stop the
+batch so a partial run can be resumed rather than replayed.
 
 ## Settings
 
