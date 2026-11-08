@@ -67,6 +67,7 @@ export const api = {
     subjectId: string,
     bookId: string,
     knowledgeId: string,
+    qtypeId: string,
   ) =>
     invokeCommand("wrongnotes_pending", {
       account_id: accountId,
@@ -74,6 +75,7 @@ export const api = {
         subject_id: subjectId,
         book_id: bookId,
         knowledge_id: knowledgeId,
+        qtype_id: qtypeId,
       },
     }),
   previewWrongNoteCleanup: (accountId: string, questionIds: string[]) =>

@@ -15,37 +15,66 @@
 //!   attempt, and a timeout is a `Transport` error the caller must resolve;
 //! - the per-question result is returned so a partial batch can be resumed.
 
+use std::collections::HashMap;
+
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::{Reader, XmlVersion};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::client::Client;
 use crate::codec;
+use crate::dto::flex;
 use crate::endpoint::get;
 use crate::error::{ProtocolError, Result};
 
 /// One subject row from `subject/list`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Ids arrive as numbers (`subjectId: 303`, `stageId: 3`), so they are read
+/// through the tolerant deserializers and kept as text. `id` is a MongoDB
+/// ObjectId the client never needs.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WrongSubject {
+    #[serde(deserialize_with = "text_or_empty")]
     pub subject_id: String,
+    #[serde(default, deserialize_with = "text_or_empty")]
     pub subject_name: String,
+    #[serde(default, deserialize_with = "flex::opt_string")]
     pub stage_id: Option<String>,
+    #[serde(default, deserialize_with = "flex::opt_string")]
     pub book_id: Option<String>,
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub wrong_count: i64,
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub killed_count: i64,
 }
 
-/// One knowledge-point row.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// One knowledge-point row from `knowledge/list/v3`.
+///
+/// The question-type columns are spelled `qTypeId` / `qTypeName`, which
+/// `rename_all` cannot produce from `qtype_id`, hence the explicit names.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WrongKnowledge {
+    #[serde(deserialize_with = "text_or_empty")]
     pub knowledge_id: String,
+    #[serde(default, deserialize_with = "text_or_empty")]
     pub knowledge_name: String,
+    #[serde(default, rename = "qTypeId", deserialize_with = "text_or_empty")]
     pub qtype_id: String,
+    #[serde(default, rename = "qTypeName", deserialize_with = "text_or_empty")]
     pub qtype_name: String,
+    #[serde(default, deserialize_with = "number_or_zero")]
     pub wrong_count: i64,
 }
 
 /// One un-cleared question from `student/question/show`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// The row only carries ids and names: the stem and the two answers live in the
+/// `paperData` / `answerData` / `userAnswerData` XML strings, so
+/// [`wrong_pending`] fills them in from there.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct WrongQuestion {
     pub question_id: String,
     pub title: String,
@@ -53,6 +82,20 @@ pub struct WrongQuestion {
     pub stem: String,
     pub correct_answer: String,
     pub student_answer: String,
+}
+
+/// The JSON row behind one question; everything else comes from the XML.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WrongQuestionRow {
+    #[serde(deserialize_with = "text_or_empty")]
+    question_id: String,
+    #[serde(default, rename = "qTypeName", deserialize_with = "text_or_empty")]
+    qtype_name: String,
+    #[serde(default, deserialize_with = "text_or_empty")]
+    knowledge_name: String,
+    #[serde(default, deserialize_with = "text_or_empty")]
+    user_answer: String,
 }
 
 /// The paper a student must answer to clear questions.
@@ -63,10 +106,11 @@ pub struct KillPaper {
     pub answer_xml: String,
 }
 
-/// Paging parameters shared by the wrong-note list endpoints.
+/// Parameters shared by the wrong-note list endpoints.
 ///
-/// Both are optional because the archive is inconsistent about whether the
-/// endpoints need a date range; each call sends only what it has.
+/// Every field is optional here, but the list endpoints reject a call that
+/// lacks `stageId`, `subjectId`, `bookId` or the time range, so callers must
+/// fill them in; absent fields are simply not sent.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WrongQuery {
     pub stage_id: Option<String>,
@@ -117,36 +161,260 @@ impl WrongQuery {
 pub async fn wrong_subjects(client: &Client) -> Result<Vec<WrongSubject>> {
     let endpoint = endpoint("wrong_subjects")?;
     let data = client.call(endpoint, &[]).await?;
-    let items = codec::into_array(data, endpoint.name)?;
-    items
-        .into_iter()
-        .map(|item| decode(item, endpoint.name))
-        .collect()
+    subjects_from_data(data, endpoint.name)
 }
 
 /// Knowledge points for one subject/book.
+///
+/// The server sorts by the column named in `orderField`; this client always
+/// wants the most-wrong first, matching the H5 page.
 pub async fn wrong_knowledge(client: &Client, query: &WrongQuery) -> Result<Vec<WrongKnowledge>> {
     let endpoint = endpoint("wrong_knowledge")?;
-    let data = client.call(endpoint, &query.form()).await?;
-    let items = codec::into_array(data, endpoint.name)?;
-    items
-        .into_iter()
-        .map(|item| decode(item, endpoint.name))
-        .collect()
+    let mut form = query.form();
+    form.push(("orderType", json!("desc")));
+    form.push(("orderField", json!("wrongTimes")));
+    let data = client.call(endpoint, &form).await?;
+    knowledge_from_data(data, endpoint.name)
 }
 
 /// The questions still to clear for one knowledge point.
 pub async fn wrong_pending(client: &Client, query: &WrongQuery) -> Result<Vec<WrongQuestion>> {
     let endpoint = endpoint("wrong_question_show")?;
     let data = client.call(endpoint, &query.form()).await?;
-    // `data.list` holds the question summaries; an empty object means "no
-    // questions", which decodes to an empty page rather than an error.
-    let mut rows = codec::into_object(data, endpoint.name)?;
-    let items = codec::take_list(&mut rows, "list", endpoint.name)?;
+    pending_from_data(data, endpoint.name)
+}
+
+/// Decode one `subject/list` payload: a bare array of rows.
+fn subjects_from_data(data: Option<Value>, endpoint: &str) -> Result<Vec<WrongSubject>> {
+    let items = codec::into_array(data, endpoint)?;
     items
         .into_iter()
-        .map(|item| decode(item, endpoint.name))
+        .map(|item| decode(item, endpoint))
         .collect()
+}
+
+/// Decode one `knowledge/list/v3` payload: `data.{list, pager}`.
+fn knowledge_from_data(data: Option<Value>, endpoint: &str) -> Result<Vec<WrongKnowledge>> {
+    let mut object = codec::into_object(data, endpoint)?;
+    let items = codec::take_list(&mut object, "list", endpoint)?;
+    items
+        .into_iter()
+        .map(|item| decode(item, endpoint))
+        .collect()
+}
+
+/// Decode one `question/show` payload.
+///
+/// The list rows are the skeleton; stems and answers live in the three XML
+/// documents. A question the XML does not mention keeps an empty field rather
+/// than failing the page, so one odd row cannot hide the rest.
+fn pending_from_data(data: Option<Value>, endpoint: &str) -> Result<Vec<WrongQuestion>> {
+    let mut object = codec::into_object(data, endpoint)?;
+    let items = codec::take_list(&mut object, "list", endpoint)?;
+    let papers = PaperText::parse(&xml_field(&object, "paperData"));
+    let answers = PaperText::parse(&xml_field(&object, "answerData"));
+    let user_answers = PaperText::parse(&xml_field(&object, "userAnswerData"));
+
+    items
+        .into_iter()
+        .map(|item| {
+            let row: WrongQuestionRow = decode(item, endpoint)?;
+            let student_answer = match user_answers.answer(&row.question_id) {
+                answer if answer.is_empty() => {
+                    PaperText::parse(&row.user_answer).answer(&row.question_id)
+                }
+                answer => answer,
+            };
+            Ok(WrongQuestion {
+                title: title_for(&row.qtype_name, &row.knowledge_name),
+                question_type: row.qtype_name,
+                stem: papers.stem(&row.question_id),
+                correct_answer: answers.answer(&row.question_id),
+                student_answer,
+                question_id: row.question_id,
+            })
+        })
+        .collect()
+}
+
+/// One XML-bearing field as text; a missing or non-string value is empty.
+fn xml_field(object: &Map<String, Value>, key: &str) -> String {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// A short label for the list: the question type, plus the knowledge point
+/// when the server actually names one (`""` and `"--"` are its placeholders).
+fn title_for(qtype_name: &str, knowledge_name: &str) -> String {
+    match knowledge_name.trim() {
+        "" | "--" => qtype_name.to_owned(),
+        name => format!("{qtype_name}（{name}）"),
+    }
+}
+
+/// What the walker is currently collecting text for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Collecting {
+    Nothing,
+    Stem,
+    Answer,
+}
+
+/// Text lifted out of the wrong-note XML payloads, keyed by question id.
+///
+/// `paperData` keeps the stem in `<question_text>`; `answerData`,
+/// `userAnswerData` and a row's `userAnswer` keep the answers as a list of
+/// `<answer>` texts.
+#[derive(Debug, Default)]
+struct PaperText {
+    stems: HashMap<String, String>,
+    answers: HashMap<String, Vec<String>>,
+}
+
+impl PaperText {
+    /// Walk one document. Malformed XML keeps whatever was read before the
+    /// error, so a bad payload degrades to empty fields instead of a dead page.
+    fn parse(xml: &str) -> Self {
+        let mut parsed = Self::default();
+        if xml.trim().is_empty() {
+            return parsed;
+        }
+
+        let mut reader = Reader::from_str(xml);
+        let mut question_id: Option<String> = None;
+        let mut collecting = Collecting::Nothing;
+        let mut buffer = String::new();
+
+        loop {
+            let event = match reader.read_event() {
+                Ok(Event::Eof) | Err(_) => break,
+                Ok(event) => event,
+            };
+            match event {
+                Event::Start(start) => match local_name(&start) {
+                    "element" => question_id = attribute(&start, "id"),
+                    "question_text" => {
+                        collecting = Collecting::Stem;
+                        buffer.clear();
+                    }
+                    "answer" => {
+                        collecting = Collecting::Answer;
+                        buffer.clear();
+                    }
+                    _ => {}
+                },
+                Event::End(end) => match end.name().local_name().into_inner() {
+                    "element" => {
+                        question_id = None;
+                        collecting = Collecting::Nothing;
+                    }
+                    "question_text" => {
+                        if let Some(id) = &question_id {
+                            parsed.stems.insert(id.clone(), plain_text(&buffer));
+                        }
+                        collecting = Collecting::Nothing;
+                    }
+                    "answer" => {
+                        if let Some(id) = &question_id {
+                            let answer = buffer.trim();
+                            if !answer.is_empty() {
+                                parsed
+                                    .answers
+                                    .entry(id.clone())
+                                    .or_default()
+                                    .push(answer.to_owned());
+                            }
+                        }
+                        collecting = Collecting::Nothing;
+                    }
+                    _ => {}
+                },
+                Event::Text(text) => {
+                    if collecting != Collecting::Nothing {
+                        buffer.push_str(&text);
+                    }
+                }
+                Event::CData(text) => {
+                    if collecting != Collecting::Nothing {
+                        buffer.push_str(&text);
+                    }
+                }
+                _ => {}
+            }
+        }
+        parsed
+    }
+
+    fn stem(&self, question_id: &str) -> String {
+        self.stems.get(question_id).cloned().unwrap_or_default()
+    }
+
+    /// Every blank's answer, in document order.
+    fn answer(&self, question_id: &str) -> String {
+        self.answers
+            .get(question_id)
+            .map(|parts| parts.join("；"))
+            .unwrap_or_default()
+    }
+}
+
+/// The local tag name, without any namespace prefix.
+fn local_name<'a>(start: &'a BytesStart<'_>) -> &'a str {
+    start.name().local_name().into_inner()
+}
+
+/// One attribute of an element, when it is present and decodable.
+fn attribute(start: &BytesStart<'_>, name: &str) -> Option<String> {
+    start
+        .attributes()
+        .flatten()
+        .find(|attribute| attribute.key.local_name().into_inner() == name)
+        .and_then(|attribute| attribute.normalized_value(XmlVersion::Implicit1_0).ok())
+        .map(|value| value.into_owned())
+}
+
+/// Flatten the HTML the paper stores as a stem into the single line the list
+/// renders: tags dropped, entities decoded, whitespace collapsed.
+fn plain_text(html: &str) -> String {
+    let mut text = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for character in html.chars() {
+        match character {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                text.push(' ');
+            }
+            _ if !in_tag => text.push(character),
+            _ => {}
+        }
+    }
+    let decoded = text
+        .replace("&nbsp;", " ")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&");
+    decoded.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Text that may arrive as a number; absent or `null` becomes empty.
+fn text_or_empty<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(flex::opt_string(deserializer)?.unwrap_or_default())
+}
+
+/// Read a count as an integer, accepting a numeric string; anything else is 0.
+fn number_or_zero<'de, D>(deserializer: D) -> std::result::Result<i64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(flex::opt_i64(deserializer)?.unwrap_or_default())
 }
 
 /// The paper to answer in order to clear questions.
@@ -250,6 +518,162 @@ fn string_field(object: &serde_json::Map<String, Value>, key: &str) -> Result<St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapters::test_support::{client, ok};
+    use httpmock::prelude::*;
+
+    /// The real shape of one `subject/list` row: numeric ids, camelCase.
+    #[test]
+    fn subject_rows_are_camel_case_and_accept_numeric_ids() {
+        let data = json!([{
+            "bookId": "0",
+            "id": "{\"date\":1794038586000}",
+            "killedCount": 0,
+            "stageId": 3,
+            "subjectId": 303,
+            "subjectName": "高中英语",
+            "wrongCount": 413
+        }]);
+        let subjects = subjects_from_data(Some(data), "wrong_subjects").unwrap();
+        assert_eq!(subjects.len(), 1);
+        assert_eq!(subjects[0].subject_id, "303");
+        assert_eq!(subjects[0].subject_name, "高中英语");
+        assert_eq!(subjects[0].stage_id.as_deref(), Some("3"));
+        assert_eq!(subjects[0].book_id.as_deref(), Some("0"));
+        assert_eq!(subjects[0].wrong_count, 413);
+        assert_eq!(subjects[0].killed_count, 0);
+    }
+
+    #[tokio::test]
+    async fn knowledge_rows_decode_qtype_from_q_type_id() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/client/wrongnote/student/knowledge/list/v3")
+                .body_contains("stageId=3")
+                .body_contains("subjectId=303")
+                .body_contains("bookId=0")
+                .body_contains("startTime=2010-01-01+00%3A00%3A00")
+                .body_contains("endTime=2026-11-08+23%3A59%3A59")
+                .body_contains("orderType=desc")
+                .body_contains("orderField=wrongTimes")
+                .body_contains("pager.pageSize=100");
+            then.status(200).json_body(ok(json!({
+                "list": [{
+                    "knowledgeId": "046001",
+                    "knowledgeName": "--",
+                    "qTypeId": 448,
+                    "qTypeName": "语法填空",
+                    "wrongCount": 19
+                }],
+                "pager": { "currentPage": 1, "pageSize": 100, "totalCount": 1 }
+            })));
+        });
+
+        let query = WrongQuery {
+            stage_id: Some("3".to_owned()),
+            subject_id: Some("303".to_owned()),
+            book_id: Some("0".to_owned()),
+            page: Some(1),
+            page_size: Some(100),
+            start_time: Some("2010-01-01 00:00:00".to_owned()),
+            end_time: Some("2026-11-08 23:59:59".to_owned()),
+            ..Default::default()
+        };
+        let rows = wrong_knowledge(&client(&server), &query).await.unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].knowledge_id, "046001");
+        assert_eq!(rows[0].qtype_id, "448");
+        assert_eq!(rows[0].qtype_name, "语法填空");
+        assert_eq!(rows[0].wrong_count, 19);
+        mock.assert_hits(1);
+    }
+
+    /// A synthetic paper: one stem, one correct answer, one student answer.
+    #[tokio::test]
+    async fn pending_merges_the_paper_xml_into_the_list_rows() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/client/wrongnote/student/question/show")
+                .body_contains("stageId=3")
+                .body_contains("subjectId=303")
+                .body_contains("bookId=0")
+                .body_contains("qtypeId=448")
+                .body_contains("knowledgeId=046001")
+                .body_contains("startTime=2010-01-01+00%3A00%3A00")
+                .body_contains("pager.currentPage=1")
+                .body_contains("pager.pageSize=10");
+            then.status(200).json_body(ok(json!({
+                "pathPrefix": "https://cdn.test",
+                "paperData": "<elements><element type=\"3\" id=\"Q1\"><question_no>1</question_no><question_text><![CDATA[<p>1 + 1 = {{1}}</p>]]></question_text></element></elements>",
+                "answerData": "<elements><element id=\"Q1\"><answers><answer id=\"1\"><![CDATA[2]]></answer><answer id=\"2\"><![CDATA[two]]></answer></answers></element></elements>",
+                "userAnswerData": "<elements><element id=\"Q1\"><answers><answer id=\"1\"><![CDATA[3]]></answer><answer id=\"2\"><![CDATA[three]]></answer></answers></element></elements>",
+                "list": [
+                    { "questionId": "Q1", "qTypeId": 448, "qTypeName": "语法填空", "knowledgeName": "--" },
+                    { "questionId": "Q2", "qTypeId": 448, "qTypeName": "语法填空", "knowledgeName": "时态" }
+                ],
+                "pager": { "currentPage": 1, "pageSize": 10 }
+            })));
+        });
+
+        let query = WrongQuery {
+            stage_id: Some("3".to_owned()),
+            subject_id: Some("303".to_owned()),
+            book_id: Some("0".to_owned()),
+            qtype_id: Some("448".to_owned()),
+            knowledge_id: Some("046001".to_owned()),
+            page: Some(1),
+            page_size: Some(10),
+            start_time: Some("2010-01-01 00:00:00".to_owned()),
+            end_time: Some("2026-11-08 23:59:59".to_owned()),
+        };
+        let rows = wrong_pending(&client(&server), &query).await.unwrap();
+
+        assert_eq!(rows.len(), 2);
+        // Q1 is in the paper: stem and both answers come from the XML.
+        assert_eq!(rows[0].question_id, "Q1");
+        assert_eq!(rows[0].title, "语法填空");
+        assert_eq!(rows[0].question_type, "语法填空");
+        assert_eq!(rows[0].stem, "1 + 1 = {{1}}");
+        assert_eq!(rows[0].correct_answer, "2；two");
+        assert_eq!(rows[0].student_answer, "3；three");
+        // Q2 has no row in the XML: the id survives, the rest stays empty.
+        assert_eq!(rows[1].question_id, "Q2");
+        assert_eq!(rows[1].title, "语法填空（时态）");
+        assert_eq!(rows[1].stem, "");
+        assert_eq!(rows[1].correct_answer, "");
+        mock.assert_hits(1);
+    }
+
+    #[test]
+    fn a_broken_paper_degrades_to_empty_fields_instead_of_failing() {
+        let data = json!({
+            "paperData": "<elements><element id=\"Q1\"><question_text><![CDATA[half",
+            "answerData": "not xml at all <<<",
+            "list": [{ "questionId": "Q1", "qTypeName": "选择题" }]
+        });
+        let rows = pending_from_data(Some(data), "wrong_question_show").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].question_id, "Q1");
+        assert_eq!(rows[0].stem, "");
+        assert_eq!(rows[0].correct_answer, "");
+    }
+
+    #[test]
+    fn the_student_answer_falls_back_to_the_row_fragment() {
+        let data = json!({
+            "paperData": "<elements><element id=\"Q1\"><question_text><![CDATA[题干]]></question_text></element></elements>",
+            "list": [{
+                "questionId": "Q1",
+                "qTypeName": "选择题",
+                "userAnswer": "<element id=\"Q1\"><answers><answer id=\"1\"><![CDATA[B]]></answer></answers></element>"
+            }]
+        });
+        let rows = pending_from_data(Some(data), "wrong_question_show").unwrap();
+        assert_eq!(rows[0].stem, "题干");
+        assert_eq!(rows[0].student_answer, "B");
+    }
 
     #[test]
     fn cleanup_form_carries_the_six_fields_and_derives_seconds() {

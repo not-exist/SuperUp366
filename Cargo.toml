@@ -29,7 +29,7 @@ httpmock = "0.7"
 keyring = "3"
 md-5 = "0.10"
 percent-encoding = "2"
-quick-xml = "0.37"
+quick-xml = "0.42"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "gzip", "json"] }
 secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }

@@ -60,11 +60,92 @@ pub struct WrongKnowledgeView {
 }
 
 /// Which questions to show.
+///
+/// `stage_id` is optional: the UI only knows the subject, so the stage is
+/// looked up from the subject row when it is missing.
 #[derive(Debug, Default, Clone, Deserialize)]
 pub struct WrongFilter {
     pub subject_id: Option<String>,
     pub book_id: Option<String>,
     pub knowledge_id: Option<String>,
+    pub qtype_id: Option<String>,
+    pub stage_id: Option<String>,
+}
+
+/// The earliest date the archive covers. Both list endpoints reject a call
+/// that has no time range, so the client always sends the widest one the H5
+/// page uses.
+const ARCHIVE_START: &str = "2010-01-01 00:00:00";
+
+/// Page sizes the wrong-note screens ask for, matching the H5 client.
+const KNOWLEDGE_PAGE_SIZE: i64 = 100;
+const PENDING_PAGE_SIZE: i64 = 10;
+
+impl WrongFilter {
+    /// Knowledge rows for the selected subject.
+    fn knowledge_query(&self, stage_id: String, today: &str) -> WrongQuery {
+        let mut query = self.list_query(stage_id, today, KNOWLEDGE_PAGE_SIZE);
+        // The knowledge list groups by question type, so it must not be
+        // filtered down to one.
+        query.qtype_id = None;
+        query.knowledge_id = None;
+        query
+    }
+
+    /// The pending questions of one knowledge point.
+    fn pending_query(&self, stage_id: String, today: &str) -> WrongQuery {
+        self.list_query(stage_id, today, PENDING_PAGE_SIZE)
+    }
+
+    /// The parameters both list endpoints require but the picker does not know.
+    fn list_query(&self, stage_id: String, today: &str, page_size: i64) -> WrongQuery {
+        WrongQuery {
+            stage_id: Some(stage_id),
+            subject_id: self.subject_id.clone(),
+            // `"0"` is the server's "all books"; an empty string is rejected.
+            book_id: Some(
+                self.book_id
+                    .clone()
+                    .filter(|book| !book.is_empty())
+                    .unwrap_or_else(|| "0".to_owned()),
+            ),
+            qtype_id: self.qtype_id.clone(),
+            knowledge_id: self.knowledge_id.clone(),
+            page: Some(1),
+            page_size: Some(page_size),
+            start_time: Some(ARCHIVE_START.to_owned()),
+            end_time: Some(format!("{today} 23:59:59")),
+        }
+    }
+}
+
+/// The stage the selected subject belongs to.
+///
+/// The list endpoints require `stageId` but the picker only knows the subject,
+/// so it comes from the subject row — one extra request, and the only place
+/// that knows the mapping.
+async fn stage_id_for(
+    client: &up366_protocol::Client,
+    filter: &WrongFilter,
+) -> up366_protocol::Result<Option<String>> {
+    if let Some(stage_id) = &filter.stage_id {
+        return Ok(Some(stage_id.clone()));
+    }
+    Ok(adapters::wrong_subjects(client)
+        .await?
+        .into_iter()
+        .find(|subject| Some(&subject.subject_id) == filter.subject_id.as_ref())
+        .and_then(|subject| subject.stage_id))
+}
+
+/// A stage the server will accept, or a message the user can act on.
+fn require_stage(stage_id: Option<String>) -> CommandResult<String> {
+    stage_id.ok_or_else(|| AppError::new("invalid_input", "找不到该学科的 stageId，请重新选择学科"))
+}
+
+/// The local date in the format the server expects for `endTime`.
+fn today() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
 }
 
 /// The subject list, used to fill the picker.
@@ -95,11 +176,10 @@ pub async fn wrongnotes_knowledge(
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<Vec<WrongKnowledgeView>> {
     let (account_id, client) = state.require_client(Some(&account_id))?;
-    let query = WrongQuery {
-        subject_id: filter.subject_id,
-        book_id: filter.book_id,
-        ..Default::default()
-    };
+    let stage_id = stage_id_for(&client, &filter)
+        .await
+        .map_err(|error| state.session_error(&account_id, &client, error))?;
+    let query = filter.knowledge_query(require_stage(stage_id)?, &today());
     Ok(adapters::wrong_knowledge(&client, &query)
         .await
         .map_err(|error| state.session_error(&account_id, &client, error))?
@@ -116,12 +196,10 @@ pub async fn wrongnotes_pending(
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<Vec<WrongQuestionView>> {
     let (account_id, client) = state.require_client(Some(&account_id))?;
-    let query = WrongQuery {
-        subject_id: filter.subject_id,
-        book_id: filter.book_id,
-        knowledge_id: filter.knowledge_id,
-        ..Default::default()
-    };
+    let stage_id = stage_id_for(&client, &filter)
+        .await
+        .map_err(|error| state.session_error(&account_id, &client, error))?;
+    let query = filter.pending_query(require_stage(stage_id)?, &today());
     Ok(adapters::wrong_pending(&client, &query)
         .await
         .map_err(|error| state.session_error(&account_id, &client, error))?
@@ -366,6 +444,52 @@ mod tests {
         let pending = store.consume(&AccountId::from("acc"), &token).unwrap();
         let ids = question_ids_of(&pending).unwrap();
         assert_eq!(ids, vec!["Q1", "Q2"]);
+    }
+
+    #[test]
+    fn the_pending_query_carries_every_parameter_the_server_requires() {
+        let filter = WrongFilter {
+            subject_id: Some("303".to_owned()),
+            // The page passes an empty book for "all books".
+            book_id: Some(String::new()),
+            knowledge_id: Some("046001".to_owned()),
+            qtype_id: Some("448".to_owned()),
+            stage_id: None,
+        };
+        let query = filter.pending_query("3".to_owned(), "2026-11-08");
+
+        assert_eq!(query.stage_id.as_deref(), Some("3"));
+        assert_eq!(query.subject_id.as_deref(), Some("303"));
+        assert_eq!(query.book_id.as_deref(), Some("0"));
+        assert_eq!(query.qtype_id.as_deref(), Some("448"));
+        assert_eq!(query.knowledge_id.as_deref(), Some("046001"));
+        assert_eq!(query.start_time.as_deref(), Some("2010-01-01 00:00:00"));
+        assert_eq!(query.end_time.as_deref(), Some("2026-11-08 23:59:59"));
+        assert_eq!(query.page, Some(1));
+        assert_eq!(query.page_size, Some(10));
+    }
+
+    #[test]
+    fn the_knowledge_query_is_not_filtered_by_question_type() {
+        let filter = WrongFilter {
+            subject_id: Some("303".to_owned()),
+            knowledge_id: Some("046001".to_owned()),
+            qtype_id: Some("448".to_owned()),
+            ..Default::default()
+        };
+        let query = filter.knowledge_query("3".to_owned(), "2026-11-08");
+
+        // The subject has several question types; skip none of them.
+        assert_eq!(query.qtype_id, None);
+        assert_eq!(query.knowledge_id, None);
+        assert_eq!(query.book_id.as_deref(), Some("0"));
+        assert_eq!(query.page_size, Some(100));
+    }
+
+    #[test]
+    fn a_subject_without_a_stage_cannot_build_a_query() {
+        assert_eq!(require_stage(None).unwrap_err().code, "invalid_input");
+        assert_eq!(require_stage(Some("3".to_owned())).unwrap(), "3");
     }
 
     #[test]

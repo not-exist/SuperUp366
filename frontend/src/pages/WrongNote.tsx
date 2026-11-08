@@ -19,6 +19,7 @@ export function WrongNote() {
 
   const [subjectId, setSubjectId] = useState<string>("");
   const [knowledgeId, setKnowledgeId] = useState<string>("");
+  const [qtypeId, setQtypeId] = useState<string>("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [preview, setPreview] = useState<CleanupPreview | null>(null);
@@ -36,10 +37,22 @@ export function WrongNote() {
   });
 
   const pending = useQuery({
-    queryKey: ["wrong-pending", account.account_id, subjectId, knowledgeId],
+    queryKey: [
+      "wrong-pending",
+      account.account_id,
+      subjectId,
+      knowledgeId,
+      qtypeId,
+    ],
     queryFn: () =>
-      api.listWrongPending(account.account_id, subjectId, "", knowledgeId),
-    enabled: Boolean(subjectId) && Boolean(knowledgeId),
+      api.listWrongPending(
+        account.account_id,
+        subjectId,
+        "",
+        knowledgeId,
+        qtypeId,
+      ),
+    enabled: Boolean(subjectId) && Boolean(knowledgeId) && Boolean(qtypeId),
   });
 
   const items: WrongNote[] = pending.data ?? [];
@@ -113,6 +126,7 @@ export function WrongNote() {
             onChange={(event) => {
               setSubjectId(event.target.value);
               setKnowledgeId("");
+              setQtypeId("");
               setSelected(new Set());
             }}
           >
@@ -129,17 +143,22 @@ export function WrongNote() {
           <span className="field-label">知识点</span>
           <select
             className="input"
-            value={knowledgeId}
+            value={knowledgeId ? `${knowledgeId}|${qtypeId}` : ""}
             onChange={(event) => {
-              setKnowledgeId(event.target.value);
+              const [nextKnowledgeId, nextQtypeId] = event.target.value.split("|");
+              setKnowledgeId(nextKnowledgeId ?? "");
+              setQtypeId(nextQtypeId ?? "");
               setSelected(new Set());
             }}
             disabled={!subjectId}
           >
             <option value="">请选择知识点</option>
             {(knowledge.data ?? []).map((point) => (
-              <option key={point.knowledge_id} value={point.knowledge_id}>
-                {point.knowledge_name}（{point.wrong_count}）
+              <option
+                key={`${point.knowledge_id}|${point.qtype_id}`}
+                value={`${point.knowledge_id}|${point.qtype_id}`}
+              >
+                {point.knowledge_name}（{point.qtype_name}，{point.wrong_count}）
               </option>
             ))}
           </select>
