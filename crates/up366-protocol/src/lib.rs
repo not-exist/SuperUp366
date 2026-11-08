@@ -21,7 +21,8 @@ pub use client::{Client, ClientBuilder, CookieJar, DEFAULT_TIMEOUT, USER_AGENT_V
 pub use codec::{parse_envelope, parse_envelope_with_codes, require_data};
 pub use dto::{
     AnswerDetail, AnswerDetailParams, Book, BookChapter, BookPlanEntry, BookTree, Course,
-    FinishedJob, FinishedTask, Job, JobInfo, Page, Pager, PaperDetail, Word, WORD_AUDIO_BASE,
+    FinishedJob, FinishedJobs, FinishedTask, Job, JobInfo, Page, Pager, PaperDetail, Word,
+    WORD_AUDIO_BASE,
 };
 pub use endpoint::{get, BodyKind, Endpoint, ENDPOINTS};
 pub use error::{ProtocolError, Result};

@@ -4,9 +4,11 @@
 //! [`up366_protocol::dto`] values plus the status rule in [`up366_core`]. The
 //! Tauri commands are thin: fetch, map, return.
 
+use std::collections::{HashMap, HashSet};
+
 use serde::Serialize;
 use up366_core::{JobKind, JobState};
-use up366_protocol::dto::{Book, Job};
+use up366_protocol::dto::{Book, FinishedJobs, Job};
 
 /// One stored account as the account switcher shows it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -47,6 +49,47 @@ pub enum StatusView {
     Expired,
     Pending,
     Unknown,
+}
+
+/// Account-wide finished / returned rows keyed by `studyTaskId` (= `jobId`).
+///
+/// The upstream endpoint ignores `courseId`, so one index covers every course
+/// in the list. A missing key means "no such row"; a present key with a `None`
+/// score means "finished but ungraded".
+#[derive(Debug, Default, Clone)]
+pub struct FinishedIndex {
+    scores: HashMap<String, Option<f64>>,
+    returned: HashSet<String>,
+}
+
+impl FinishedIndex {
+    pub fn new(rows: &FinishedJobs) -> Self {
+        let scores = rows
+            .finished
+            .iter()
+            .filter_map(|row| row.id().map(|id| (id.to_owned(), row.score)))
+            .collect();
+        let returned = rows
+            .returned
+            .iter()
+            .filter_map(|row| row.id().map(str::to_owned))
+            .collect();
+        Self { scores, returned }
+    }
+
+    /// Resolve one job against both lists, falling back to its deadline.
+    pub fn state(&self, job: &Job, now: chrono::DateTime<chrono::Utc>) -> JobState {
+        let id = job.id();
+        resolve_job_state(
+            id.and_then(|id| self.scores.get(id)).copied().flatten(),
+            id.is_some_and(|id| self.scores.contains_key(id)),
+            id.is_some_and(|id| self.returned.contains(id)),
+            job.status(),
+            job.student_status(),
+            job.end_time.as_deref(),
+            now,
+        )
+    }
 }
 
 /// One row of the flat, cross-class job list.
@@ -103,7 +146,7 @@ impl JobView {
             name: job.title().to_owned(),
             kind: job.kind(),
             status,
-            score: score.or(job.task_score),
+            score,
             deadline,
             read_aloud,
             audio_pending: false,
@@ -118,6 +161,7 @@ impl JobView {
 pub fn resolve_job_state(
     finished_score: Option<f64>,
     in_finished_list: bool,
+    in_returned_list: bool,
     task_status: Option<i64>,
     stu_status: Option<i64>,
     end_time: Option<&str>,
@@ -126,6 +170,7 @@ pub fn resolve_job_state(
     up366_core::resolve_status(&up366_core::StatusInputs {
         finished_score,
         in_finished_list,
+        in_returned_list,
         task_status,
         stu_status,
         end_time: end_time.and_then(up366_core::parse_deadline),
@@ -192,7 +237,7 @@ mod tests {
     #[test]
     fn status_finished_reports_the_finished_list_score() {
         let now = Utc.with_ymd_and_hms(2026, 1, 10, 12, 0, 0).unwrap();
-        let state = resolve_job_state(Some(93.5), true, Some(0), None, None, now);
+        let state = resolve_job_state(Some(93.5), true, false, Some(0), None, None, now);
         assert_eq!(state, JobState::Finished { score: Some(93.5) });
     }
 
@@ -201,6 +246,7 @@ mod tests {
         let now = Utc.with_ymd_and_hms(2026, 1, 10, 12, 0, 0).unwrap();
         let state = resolve_job_state(
             None,
+            false,
             false,
             Some(0),
             None,
@@ -216,12 +262,91 @@ mod tests {
         let state = resolve_job_state(
             None,
             false,
+            false,
             Some(0),
             None,
             Some("2026-02-01T00:00:00Z"),
             now,
         );
         assert_eq!(state, JobState::Pending);
+    }
+
+    fn finished_jobs() -> FinishedJobs {
+        let finished: up366_protocol::dto::FinishedJob =
+            serde_json::from_value(serde_json::json!({
+                "studyTaskId": "JOB-1",
+                "score": 30.0
+            }))
+            .unwrap();
+        let ungraded: up366_protocol::dto::FinishedJob =
+            serde_json::from_value(serde_json::json!({
+                "studyTaskId": "JOB-4",
+                "score": null
+            }))
+            .unwrap();
+        let returned: up366_protocol::dto::FinishedJob =
+            serde_json::from_value(serde_json::json!({
+                "studyTaskId": "JOB-2",
+                "score": null
+            }))
+            .unwrap();
+        FinishedJobs {
+            finished: vec![finished, ungraded],
+            returned: vec![returned],
+        }
+    }
+
+    fn job_with_deadline(job_id: &str, end_time: &str) -> Job {
+        Job::from_value(serde_json::json!({
+            "jobId": job_id,
+            "jobName": "Unit 4",
+            "extParam": { "taskStatus": 0 },
+            "endTime": end_time
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn finished_index_resolves_rows_by_study_task_id() {
+        let now = Utc.with_ymd_and_hms(2026, 1, 10, 12, 0, 0).unwrap();
+        let index = FinishedIndex::new(&finished_jobs());
+
+        // A finished row wins over its deadline and keeps the list score.
+        assert_eq!(
+            index.state(&job_with_deadline("JOB-1", "2026-01-01T00:00:00Z"), now),
+            JobState::Finished { score: Some(30.0) }
+        );
+        // An ungraded finished row is still finished, not expired.
+        assert_eq!(
+            index.state(&job_with_deadline("JOB-4", "2026-01-01T00:00:00Z"), now),
+            JobState::Finished { score: None }
+        );
+        // A returned row beats a passed deadline.
+        assert_eq!(
+            index.state(&job_with_deadline("JOB-2", "2026-01-01T00:00:00Z"), now),
+            JobState::Returned
+        );
+        // No row: the deadline still decides.
+        assert_eq!(
+            index.state(&job_with_deadline("JOB-3", "2026-01-01T00:00:00Z"), now),
+            JobState::Expired
+        );
+        assert_eq!(
+            index.state(&job_with_deadline("JOB-3", "2026-02-01T00:00:00Z"), now),
+            JobState::Pending
+        );
+    }
+
+    #[test]
+    fn job_view_never_uses_the_full_task_score() {
+        let job = Job::from_value(serde_json::json!({
+            "jobId": "JOB-1",
+            "jobName": "Unit 4",
+            "extParam": { "taskStatus": 0, "taskScore": 40.0 }
+        }))
+        .unwrap();
+        let view = JobView::new(&job, "英语一班", "一班", None, false);
+        assert_eq!(view.score, None);
     }
 
     #[test]

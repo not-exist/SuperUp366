@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use crate::adapters::{decode_items, endpoint};
 use crate::client::Client;
 use crate::codec;
-use crate::dto::{self, Course, FinishedJob, FinishedTask, Job, JobInfo};
+use crate::dto::{self, Course, FinishedTask, Job, JobInfo};
 use crate::error::{ProtocolError, Result};
 
 /// `data.list` from `/client/course/list-of-student/v2`.
@@ -67,32 +67,53 @@ pub async fn job_info(
     dto::decode(codec::require_data(data, endpoint.name)?, endpoint.name)
 }
 
-/// Finished jobs for a whole course.
+/// Finished and returned jobs for the signed-in student.
 ///
-/// The only known client for this endpoint is the H5 bundle, whose response
-/// wrapper is not documented with the same confidence as the others. Both an
-/// array and the common `allTaskList` / `finishedJobList` / `list` wrappers
-/// are accepted; anything else is a decode error.
-pub async fn course_finished_jobs(client: &Client, course_id: &str) -> Result<Vec<FinishedJob>> {
+/// The endpoint is account-wide: it ignores `courseId` and returns the same
+/// rows for every course. Callers must therefore invoke it once per refresh
+/// (passing any course the student belongs to) and key the rows on
+/// `studyTaskId`, which equals the job's `jobId`.
+///
+/// The payload is an object with `finishedList` / `returnedList`; an array or
+/// the older `allTaskList` / `finishedJobList` / `list` wrapper is still
+/// accepted as a single finished list.
+pub async fn course_finished_jobs(client: &Client, course_id: &str) -> Result<dto::FinishedJobs> {
     let endpoint = endpoint("course_finished_jobs")?;
     let data = client
         .call(endpoint, &[("courseId", json!(course_id))])
         .await?;
 
-    let items = match data {
-        None => Vec::new(),
-        Some(Value::Array(items)) => items,
+    let mut rows = dto::FinishedJobs::default();
+    match data {
+        None => {}
+        Some(Value::Array(items)) => {
+            rows.finished = decode_items(items, endpoint.name)?;
+        }
         Some(Value::Object(mut object)) => {
-            let mut found = None;
-            for key in ["allTaskList", "finishedJobList", "list"] {
-                if object.contains_key(key) {
-                    found = Some(codec::take_list(&mut object, key, endpoint.name)?);
-                    break;
-                }
+            if object.contains_key("finishedList") || object.contains_key("returnedList") {
+                rows.finished = decode_items(
+                    codec::take_list(&mut object, "finishedList", endpoint.name)?,
+                    endpoint.name,
+                )?;
+                rows.returned = decode_items(
+                    codec::take_list(&mut object, "returnedList", endpoint.name)?,
+                    endpoint.name,
+                )?;
+            } else {
+                let key = ["allTaskList", "finishedJobList", "list"]
+                    .into_iter()
+                    .find(|key| object.contains_key(*key))
+                    .ok_or_else(|| {
+                        ProtocolError::Decode(format!(
+                            "{}: data has no finished-job list",
+                            endpoint.name
+                        ))
+                    })?;
+                rows.finished = decode_items(
+                    codec::take_list(&mut object, key, endpoint.name)?,
+                    endpoint.name,
+                )?;
             }
-            found.ok_or_else(|| {
-                ProtocolError::Decode(format!("{}: data has no finished-job list", endpoint.name))
-            })?
         }
         Some(_) => {
             return Err(ProtocolError::Decode(format!(
@@ -100,8 +121,8 @@ pub async fn course_finished_jobs(client: &Client, course_id: &str) -> Result<Ve
                 endpoint.name
             )))
         }
-    };
-    decode_items(items, endpoint.name)
+    }
+    Ok(rows)
 }
 
 /// `data` from `/client/book/finished-task/list`.
@@ -223,8 +244,56 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn course_finished_jobs_accepts_wrapped_and_plain_lists() {
+    async fn course_finished_jobs_decodes_finished_and_returned_lists() {
         let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/client/student/all/course/finish/job/v2")
+                .body_contains("courseId=9222783");
+            then.status(200).json_body(ok(json!({
+                "studyPlanList": [{ "studyPlanId": 1, "flevel": 0 }],
+                "finishedList": [{
+                    "studyTaskId": "JOB-1",
+                    "courseId": 9222783,
+                    "batchId": "B-1",
+                    "score": 30.0,
+                    "jobScore": "30.0分",
+                    "studyDate": 1783151094000_i64
+                }],
+                "returnedList": [{
+                    "studyTaskId": "JOB-2",
+                    "courseId": 9222783,
+                    "score": null
+                }],
+                "complexFinishedList": [],
+                "version": "V-1"
+            })));
+        });
+
+        let client = client(&server);
+        let rows = course_finished_jobs(&client, "9222783").await.unwrap();
+
+        assert_eq!(rows.finished.len(), 1);
+        assert_eq!(rows.finished[0].id(), Some("JOB-1"));
+        assert_eq!(rows.finished[0].score, Some(30.0));
+        assert_eq!(rows.returned.len(), 1);
+        assert_eq!(rows.returned[0].id(), Some("JOB-2"));
+        assert_eq!(rows.returned[0].score, None);
+        mock.assert_hits(1);
+    }
+
+    #[tokio::test]
+    async fn course_finished_jobs_accepts_plain_and_legacy_wrappers() {
+        let server = MockServer::start();
+        let plain = server.mock(|when, then| {
+            when.method(POST)
+                .path("/client/student/all/course/finish/job/v2")
+                .body_contains("courseId=2");
+            then.status(200).json_body(ok(json!([{
+                "studyTaskId": "JOB-2",
+                "score": 12
+            }])));
+        });
         let wrapped = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/student/all/course/finish/job/v2")
@@ -235,10 +304,14 @@ mod tests {
         });
 
         let client = client(&server);
-        let jobs = course_finished_jobs(&client, "1").await.unwrap();
-        assert_eq!(jobs.len(), 1);
-        assert_eq!(jobs[0].job_id.as_deref(), Some("JOB-1"));
-        assert_eq!(jobs[0].score, Some(90.0));
+        let plain_rows = course_finished_jobs(&client, "2").await.unwrap();
+        assert_eq!(plain_rows.finished[0].id(), Some("JOB-2"));
+        assert_eq!(plain_rows.finished[0].score, Some(12.0));
+
+        let wrapped_rows = course_finished_jobs(&client, "1").await.unwrap();
+        assert_eq!(wrapped_rows.finished[0].id(), Some("JOB-1"));
+        assert_eq!(wrapped_rows.finished[0].score, Some(90.0));
+        plain.assert_hits(1);
         wrapped.assert_hits(1);
     }
 

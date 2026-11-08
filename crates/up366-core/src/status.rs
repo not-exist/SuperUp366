@@ -52,6 +52,8 @@ pub struct StatusInputs {
     pub finished_score: Option<f64>,
     /// Whether the finished-jobs list contains this job at all.
     pub in_finished_list: bool,
+    /// Whether the returned-jobs list contains this job.
+    pub in_returned_list: bool,
     /// `taskStatus` from the task payload.
     pub task_status: Option<i64>,
     /// `stuStatus` from the task payload.
@@ -70,7 +72,8 @@ pub struct StatusInputs {
 ///
 /// 1. **Finished** — present in the finished list, or `taskStatus == 1`, or
 ///    `stuStatus > 1`. Score is taken from the finished list when available.
-/// 2. **Returned** — `stuStatus == 1` and `taskStatus != 1` (assigned back).
+/// 2. **Returned** — present in the returned list, or `stuStatus == 1` and
+///    `taskStatus != 1` (assigned back).
 /// 3. **Expired** — deadline passed and nothing submitted (detail unfinished or
 ///    absent).
 /// 4. **Pending** — still within the deadline.
@@ -86,8 +89,8 @@ pub fn resolve_status(inputs: &StatusInputs) -> JobState {
         };
     }
 
-    // 2. Returned: stuStatus == 1 while taskStatus is not 1.
-    if inputs.stu_status == Some(1) {
+    // 2. Returned: an explicit returned row, or stuStatus == 1 while not finished.
+    if inputs.in_returned_list || inputs.stu_status == Some(1) {
         return JobState::Returned;
     }
 
@@ -153,6 +156,31 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(resolve_status(&i), JobState::Returned);
+    }
+
+    #[test]
+    fn returned_list_wins_over_a_passed_deadline() {
+        let past = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let i = StatusInputs {
+            in_returned_list: true,
+            task_status: Some(0),
+            end_time: Some(past),
+            now: now(),
+            ..Default::default()
+        };
+        assert_eq!(resolve_status(&i), JobState::Returned);
+    }
+
+    #[test]
+    fn finished_list_beats_the_returned_list() {
+        let i = StatusInputs {
+            in_finished_list: true,
+            in_returned_list: true,
+            finished_score: Some(88.0),
+            now: now(),
+            ..Default::default()
+        };
+        assert_eq!(resolve_status(&i), JobState::Finished { score: Some(88.0) });
     }
 
     #[test]

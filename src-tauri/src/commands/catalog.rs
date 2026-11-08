@@ -9,7 +9,7 @@ use up366_protocol::{adapters, dto::Course};
 
 use crate::error::CommandResult;
 use crate::session::AppState;
-use crate::state::{CourseView, JobView};
+use crate::state::{CourseView, FinishedIndex, JobView};
 
 /// Optional filter for `jobs_list`, kept in one object so the command signature
 /// stays stable as filters grow.
@@ -58,6 +58,19 @@ pub async fn jobs_list(
         .await
         .map_err(|error| state.session_error(&account_id, &client, error))?;
 
+    // The finished/returned rows are account-wide: the endpoint ignores
+    // `courseId` and returns the same rows for every course, so one call per
+    // refresh covers them all.
+    let finished = match courses.first().and_then(Course::id) {
+        Some(course_id) => FinishedIndex::new(
+            &adapters::course_finished_jobs(&client, course_id)
+                .await
+                .map_err(|error| state.session_error(&account_id, &client, error))?,
+        ),
+        None => FinishedIndex::default(),
+    };
+    let now = Utc::now();
+
     let mut rows: Vec<JobView> = Vec::new();
     for (index, course) in courses.iter().enumerate() {
         let Some(course_id) = course.id() else {
@@ -75,21 +88,18 @@ pub async fn jobs_list(
             Err(_) => continue,
         };
         for job in &jobs {
-            let state = crate::state::resolve_job_state(
-                None,
-                false,
-                job.status(),
-                job.student_status(),
-                job.end_time.as_deref(),
-                Utc::now(),
-            );
+            let job_state = finished.state(job, now);
+            let score = match job_state {
+                up366_core::JobState::Finished { score } => score,
+                _ => None,
+            };
             rows.push(JobView::new_with_state(
                 job,
                 view.name.clone(),
                 view.label().to_owned(),
-                None,
+                score,
                 false,
-                Some(state),
+                Some(job_state),
             ));
         }
     }

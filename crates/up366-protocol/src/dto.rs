@@ -394,10 +394,16 @@ impl JobInfo {
     }
 }
 
-/// One row from the course-wide finished-job list.
+/// One row from the account-wide finished-job list.
+///
+/// Rows are keyed by `studyTaskId`, which equals the job's `jobId` (not its
+/// `contentId`). `jobId` itself only appears in older wrappers of the same
+/// payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FinishedJob {
+    #[serde(default, deserialize_with = "flex::opt_string")]
+    pub study_task_id: Option<String>,
     #[serde(default, deserialize_with = "flex::opt_string")]
     pub job_id: Option<String>,
     #[serde(default, deserialize_with = "flex::opt_string")]
@@ -422,6 +428,22 @@ pub struct FinishedJob {
     pub submit_time: Option<String>,
     #[serde(default)]
     pub raw: Value,
+}
+
+impl FinishedJob {
+    /// The job id this row marks as submitted.
+    pub fn id(&self) -> Option<&str> {
+        self.study_task_id.as_deref().or(self.job_id.as_deref())
+    }
+}
+
+/// The account-wide finished and returned rows for one student.
+#[derive(Debug, Clone, Default)]
+pub struct FinishedJobs {
+    /// `data.finishedList`.
+    pub finished: Vec<FinishedJob>,
+    /// `data.returnedList`.
+    pub returned: Vec<FinishedJob>,
 }
 
 /// One row from `/client/book/finished-task/list`.
