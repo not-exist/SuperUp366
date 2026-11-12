@@ -16,7 +16,7 @@ use serde_json::Value as JsonValue;
 use up366_core::JobKind;
 use up366_protocol::{
     adapters,
-    dto::{BookTree, FinishedTask},
+    dto::{Book, BookTree, FinishedTask},
 };
 
 use crate::error::CommandResult;
@@ -86,18 +86,40 @@ pub async fn books_list(
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<Vec<BookListItem>> {
     let (account_id, client) = state.require_client(Some(&account_id))?;
-    Ok(adapters::books(&client)
+    let purchased = adapters::books(&client)
         .await
-        .map_err(|error| state.session_error(&account_id, &client, error))?
-        .iter()
-        .map(|book| BookListItem {
-            book_id: book.id().unwrap_or_default().to_owned(),
+        .map_err(|error| state.session_error(&account_id, &client, error))?;
+    let assigned = adapters::course_books(&client)
+        .await
+        .map_err(|error| state.session_error(&account_id, &client, error))?;
+    Ok(shelf_items(&purchased, &assigned))
+}
+
+/// The shelf is the union of purchased goods and course books.
+///
+/// `buy-book` only lists what the student bought; 新概念英语 and the other
+/// class-assigned books are only in `/client/student/course/list`. Order is
+/// purchase order first, then course order, and a book in both lists is kept
+/// once (the purchased row wins because it carries the cover and validity).
+fn shelf_items(purchased: &[Book], assigned: &[Book]) -> Vec<BookListItem> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut items = Vec::new();
+    for book in purchased.iter().chain(assigned) {
+        let Some(id) = book.id() else {
+            continue;
+        };
+        if !seen.insert(id) {
+            continue;
+        }
+        items.push(BookListItem {
+            book_id: id.to_owned(),
             name: book.title().to_owned(),
             subject: book.subject_id.clone().unwrap_or_default(),
             cover_url: book.cover().map(str::to_owned),
             is_2025_reader: book.is_2025_reader(),
-        })
-        .collect())
+        });
+    }
+    items
 }
 
 /// One book with its chapters and per-page completion.
@@ -448,5 +470,34 @@ mod tests {
         assert_eq!(jobs[1].job_id, "TK2");
         assert_eq!(jobs[1].name, "测验");
         assert_eq!(jobs[1].status, StatusView::Finished { score: Some(100.0) });
+    }
+
+    fn book(value: JsonValue) -> Book {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn shelf_includes_course_books_and_keeps_purchased_metadata() {
+        let purchased = vec![book(json!({
+            "bookId": "B-1",
+            "bookName": "探索·发现",
+            "goodsImg": "cover-1",
+            "packType": 6
+        }))];
+        let assigned = vec![
+            book(json!({ "bookId": "B-1", "bookName": "探索·发现" })),
+            book(json!({ "bookId": "B-2", "bookName": "新概念英语1", "bookType": 2 })),
+            book(json!({ "bookName": "没有 id 的行" })),
+        ];
+
+        let items = shelf_items(&purchased, &assigned);
+
+        // The duplicate keeps the purchased row, and the id-less row is dropped
+        // because the frontend keys cards on the id.
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].book_id, "B-1");
+        assert_eq!(items[0].cover_url.as_deref(), Some("cover-1"));
+        assert_eq!(items[1].book_id, "B-2");
+        assert_eq!(items[1].name, "新概念英语1");
     }
 }

@@ -45,7 +45,8 @@ URL once with `?ticket=<st>` (or `&ticket=` when a query already exists).
 | Job detail | `studytask-api /client/student/job/info` (`studyTaskId = jobId`) |
 | Finished/returned | `studytask-api /client/student/all/course/finish/job/v2` |
 | Finished scores | `dsb-api /client/book/finished-task/list` |
-| Books | `book-api /client/books/buy-book` |
+| Books (purchased) | `book-api /client/books/buy-book` |
+| Course books | `course-api /client/student/course/list` (`data[].books`) |
 | Book info | `book-api /client/v2/book/info` |
 | Book tree | `book-api /client/books/tree` |
 | Book plan | `studytask-api /client/book/plan` |
@@ -86,6 +87,12 @@ fields marks everything pending or expired. The authoritative rows come from
 - `chapters`: type 1 nodes with `id`, `parentId`, `name`.
 - `pages`: type 2 nodes with `name`, `parentId` (a chapter id) and `taskId`.
 - `tasks`: type 3 nodes with `id`, `parentId` (a chapter id), `taskType`.
+
+The shelf is the union of `/client/books/buy-book` (purchased goods) and
+`data[].books` from `/client/student/course/list` (class-assigned books such as
+新概念英语). The two lists overlap, so entries are deduplicated by `bookId`.
+`book_info` / `books/tree` still take `bookType=1`, matching the PC client,
+which hardcodes that value; for a `bookType=2` course book the tree is empty.
 
 The assignment list is `tasks`; a page only links to one through `taskId`, and
 many chapters (for example 测验) have a task and no page at all. Iterating

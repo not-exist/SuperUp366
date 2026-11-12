@@ -69,6 +69,10 @@ yields two rows.
 
 `books_list` is shelf metadata only: a book's total task count needs the whole
 tree (megabytes for a large reader book), so it is fetched on the detail page.
+The shelf is the union of purchased goods (`/client/books/buy-book`) and the
+books attached to the student's courses (`/client/student/course/list`,
+`data[].books`); 新概念英语 and other class-assigned books exist only in the
+latter. A book in both lists is shown once.
 `book_detail` builds rows from the tree's `tasks` array (type 3), using a page
 (type 2) only for the display name and falling back to the owning chapter's
 title when a task has no page. `progress` / `total` come from

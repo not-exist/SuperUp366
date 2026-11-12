@@ -16,6 +16,25 @@ pub async fn books(client: &Client) -> Result<Vec<Book>> {
     decode_items(items, endpoint.name)
 }
 
+/// Books attached to the student's courses.
+///
+/// `/client/books/buy-book` only returns purchased goods. Course books such as
+/// 新概念英语 are assigned by the class and only appear in `data[].books` of
+/// `/client/student/course/list`, so the shelf has to read both lists.
+pub async fn course_books(client: &Client) -> Result<Vec<Book>> {
+    let endpoint = endpoint("course_books")?;
+    let data = client.call(endpoint, &[]).await?;
+    let courses = codec::into_array(data, endpoint.name)?;
+    let mut books = Vec::new();
+    for course in courses {
+        let Some(items) = course.get("books").and_then(|value| value.as_array()) else {
+            continue;
+        };
+        books.extend(decode_items(items.clone(), endpoint.name)?);
+    }
+    Ok(books)
+}
+
 /// `data` object from `/client/v2/book/info`.
 pub async fn book_info(client: &Client, book_id: &str) -> Result<Book> {
     let endpoint = endpoint("book_info")?;
@@ -113,6 +132,35 @@ mod tests {
         assert_eq!(books[0].cover(), Some("https://cdn/cover.jpg"));
         assert!(books[0].is_2025_reader());
         assert_eq!(books[0].raw["goodsId"], json!(99001));
+        mock.assert_hits(1);
+    }
+
+    #[tokio::test]
+    async fn course_books_flattens_every_course_and_skips_courses_without_books() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST).path("/client/student/course/list");
+            then.status(200).json_body(ok(json!([
+                { "courseId": 1, "books": [
+                    { "bookId": "B-1", "bookName": "新概念英语1", "bookType": 2 },
+                    { "bookId": "B-2", "bookName": "语法专项练习" }
+                ]},
+                { "courseId": 2, "books": [
+                    { "bookId": "B-1", "bookName": "新概念英语1" }
+                ]},
+                { "courseId": 3 }
+            ])));
+        });
+
+        let client = client(&server);
+        let books = course_books(&client).await.unwrap();
+
+        // Flattening keeps the duplicate: the shelf dedupes across both sources.
+        assert_eq!(books.len(), 3);
+        assert_eq!(books[0].id(), Some("B-1"));
+        assert_eq!(books[0].title(), "新概念英语1");
+        assert_eq!(books[0].raw["bookType"], json!(2));
+        assert_eq!(books[2].id(), Some("B-1"));
         mock.assert_hits(1);
     }
 

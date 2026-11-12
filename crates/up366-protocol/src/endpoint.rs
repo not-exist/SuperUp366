@@ -138,6 +138,15 @@ pub const ENDPOINTS: &[Endpoint] = &[
         false,
         BodyKind::None,
     ),
+    // Books attached to a course are not in `buy-book`: the shelf is the
+    // union of the two, so the course list is fetched as well.
+    ep(
+        "course_books",
+        COURSE_API,
+        "/client/student/course/list",
+        false,
+        BodyKind::Form,
+    ),
     ep(
         "book_info",
         BOOK_API,

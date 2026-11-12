@@ -15,7 +15,7 @@ pub mod wordpk;
 pub mod words;
 
 pub use answers::{answer_detail, answer_detail_v1, answer_detail_v2, paper_detail};
-pub use books::{book_info, book_plan, book_tree, books};
+pub use books::{book_info, book_plan, book_tree, books, course_books};
 pub use catalog::{course_finished_jobs, courses, finished_tasks, job_info, jobs};
 pub use correction::{
     build_tasks_json, clear_wrong_notes, correction_draw, correction_overview, correction_status,

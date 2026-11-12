@@ -19,7 +19,7 @@ export function Books() {
         <div>
           <h1 className="page-title">书籍</h1>
           <p className="page-subtitle">
-            已购买的教材与同步练习，进入书籍可查看章节和目录作业。
+            课程教材与已购买的书籍，进入书籍可查看章节和目录作业。
           </p>
         </div>
       </header>
@@ -33,7 +33,7 @@ export function Books() {
       {books.isSuccess && books.data.length === 0 && (
         <EmptyState
           title="暂无书籍"
-          description="当前账号还没有已购买的书籍。"
+          description="当前账号还没有课程教材或已购买的书籍。"
         />
       )}
 
