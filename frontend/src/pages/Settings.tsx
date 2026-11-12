@@ -209,23 +209,6 @@ export function SettingsPage() {
         <div className="section">
           <h3 className="section-title">朗读提交</h3>
 
-          <label className="checkbox-row" htmlFor="setting-dry-run">
-            <input
-              id="setting-dry-run"
-              type="checkbox"
-              checked={form.read_aloud_dry_run}
-              onChange={(event) =>
-                patch("read_aloud_dry_run", event.target.checked)
-              }
-            />
-            <span>
-              <span className="checkbox-row-label">只做上传校验与演练</span>
-              <span className="checkbox-row-hint">
-                协议尚未确认正式提交的请求形状时保持开启；关闭后会调用成绩接口。
-              </span>
-            </span>
-          </label>
-
           <label className="checkbox-row" htmlFor="setting-keep-audio">
             <input
               id="setting-keep-audio"

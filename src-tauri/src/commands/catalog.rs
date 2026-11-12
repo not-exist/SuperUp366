@@ -175,6 +175,7 @@ fn job_record(
         content_id: job.content().map(str::to_owned),
         book_id: job.book().map(str::to_owned),
         chapter_id: job.chapter_id.clone(),
+        paper_id: job.paper().map(str::to_owned),
         name: job.title().to_owned(),
         order_index: order as i64,
         raw_json: serde_json::to_string(&job.raw).unwrap_or_default(),

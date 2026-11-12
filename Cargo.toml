@@ -24,12 +24,15 @@ up366-media = { path = "crates/up366-media" }
 up366-sync = { path = "crates/up366-sync" }
 
 async-trait = "0.1"
+base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 flate2 = "1"
+hmac = "0.12"
 httpmock = "0.7"
 keyring = "3"
 md-5 = "0.10"
 percent-encoding = "2"
+sha1 = "0.10"
 quick-xml = "0.42"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "gzip", "json"] }
 secrecy = "0.10"

@@ -2,9 +2,11 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/commands";
+import { isTauriRuntime } from "../api/invoke";
 import type {
   ReadAloudPreview,
   ReadAloudSlot,
+  ReadAloudSubmit,
   UploadStatus,
 } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -18,18 +20,17 @@ import { errorMessage, percent } from "../utils";
 interface LocalUpload {
   status: UploadStatus;
   fileName?: string;
+  recordUrl?: string;
   error?: string;
 }
 
-// The OSS transfer is not wired yet, so a validated file is "ready" and must
-// never be presented as uploaded.
 const UPLOAD_LABELS: Record<UploadStatus, string> = {
   idle: "未选择",
   validating: "校验中",
-  ready: "已校验（未上传）",
+  ready: "待上传",
   uploading: "上传中",
   uploaded: "已上传",
-  failed: "校验失败",
+  failed: "失败",
 };
 
 const UPLOAD_BADGE: Record<UploadStatus, string> = {
@@ -41,13 +42,40 @@ const UPLOAD_BADGE: Record<UploadStatus, string> = {
   failed: "badge--expired",
 };
 
+/** Pick one local file. Tauri returns a real path; the browser preview cannot. */
+async function pickMp3(): Promise<{ path: string; name: string } | null> {
+  if (isTauriRuntime) {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "MP3", extensions: ["mp3"] }],
+    });
+    if (typeof selected !== "string") return null;
+    const name = selected.split(/[\\/]/).pop() ?? selected;
+    return { path: selected, name };
+  }
+
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".mp3,audio/mpeg";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      resolve(file ? { path: file.name, name: file.name } : null);
+    };
+    input.click();
+  });
+}
+
 export function ReadAloud() {
   const { jobId } = useParams();
   const account = useAccount();
   const queryClient = useQueryClient();
   const [uploads, setUploads] = useState<Record<string, LocalUpload>>({});
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [result, setResult] = useState<ReadAloudPreview | null>(null);
+  const [scores, setScores] = useState<Record<string, number>>({});
+  const [preview, setPreview] = useState<ReadAloudPreview | null>(null);
+  const [confirmed, setConfirmed] = useState<ReadAloudSubmit | null>(null);
 
   const task = useQuery({
     queryKey: ["read-aloud", account.account_id, jobId],
@@ -55,76 +83,87 @@ export function ReadAloud() {
     enabled: Boolean(jobId),
   });
 
-  // The score path is closed until the payload shape is confirmed, so this
-  // is always a dry run regardless of the settings toggle.
-  const dryRun = true;
   const slots = task.data?.slots ?? [];
+  const submitted = task.data?.submitted ?? false;
 
   function statusFor(slot: ReadAloudSlot): UploadStatus {
-    return (
-      uploads[slot.question_id]?.status ??
-      (slot.record_url ? "uploaded" : "idle")
-    );
+    return uploads[slot.question_id]?.status ?? (slot.record_url ? "uploaded" : "idle");
   }
 
-  const readyCount = slots.filter((slot) => statusFor(slot) === "ready").length;
-  const allReady = slots.length > 0 && readyCount === slots.length;
+  function recordUrlFor(slot: ReadAloudSlot): string | null {
+    return uploads[slot.question_id]?.recordUrl ?? slot.record_url;
+  }
 
-  const submit = useMutation({
-    mutationFn: () =>
-      api.submitReadAloud(account.account_id, jobId ?? "", true),
-    onSuccess: (data) => {
-      setResult(data);
-      setConfirmOpen(false);
-      void queryClient.invalidateQueries({
-        queryKey: ["read-aloud", account.account_id, jobId],
-      });
-    },
-  });
+  function scoreFor(slot: ReadAloudSlot): number {
+    return scores[slot.question_id] ?? slot.score;
+  }
 
-  async function handleFile(slot: ReadAloudSlot, file: File) {
-    const questionId = slot.question_id;
-    if (!file.name.toLowerCase().endsWith(".mp3")) {
+  const uploadedCount = slots.filter((slot) => statusFor(slot) === "uploaded").length;
+  const allUploaded = slots.length > 0 && uploadedCount === slots.length;
+
+  async function handlePick(slot: ReadAloudSlot) {
+    const picked = await pickMp3();
+    if (!picked) return;
+    if (!picked.name.toLowerCase().endsWith(".mp3")) {
       setUploads((previous) => ({
         ...previous,
-        [questionId]: {
-          status: "failed",
-          fileName: file.name,
-          error: "只接受 mp3 文件",
-        },
+        [slot.question_id]: { status: "failed", fileName: picked.name, error: "只接受 mp3 文件" },
       }));
       return;
     }
 
     setUploads((previous) => ({
       ...previous,
-      [questionId]: { status: "validating", fileName: file.name },
+      [slot.question_id]: { status: "uploading", fileName: picked.name },
     }));
-
     try {
-      await api.uploadRecording(
+      const result = await api.uploadRecording(
         account.account_id,
         jobId ?? "",
-        questionId,
-        file.name,
-        file.name,
+        slot.question_id,
+        picked.path,
+        picked.name,
       );
       setUploads((previous) => ({
         ...previous,
-        // "ready", not "uploaded": the bytes never left the machine.
-        [questionId]: { status: "ready", fileName: file.name },
+        [slot.question_id]: {
+          status: "uploaded",
+          fileName: result.file_name,
+          recordUrl: result.record_url,
+        },
       }));
     } catch (error) {
       setUploads((previous) => ({
         ...previous,
-        [questionId]: {
+        [slot.question_id]: {
           status: "failed",
-          fileName: file.name,
+          fileName: picked.name,
           error: errorMessage(error),
         },
       }));
     }
   }
+
+  const previewMutation = useMutation({
+    mutationFn: () =>
+      api.previewReadAloud(
+        account.account_id,
+        jobId ?? "",
+        slots.map((slot) => ({ question_id: slot.question_id, score: scoreFor(slot) })),
+      ),
+    onSuccess: (data) => setPreview(data),
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: () => api.submitReadAloud(preview?.confirm_token ?? ""),
+    onSuccess: (data) => {
+      setConfirmed(data);
+      setPreview(null);
+      void queryClient.invalidateQueries({
+        queryKey: ["read-aloud", account.account_id, jobId],
+      });
+    },
+  });
 
   return (
     <div className="page">
@@ -133,8 +172,8 @@ export function ReadAloud() {
           <h1 className="page-title">{task.data?.title ?? "朗读跟读"}</h1>
           <p className="page-subtitle">
             {task.data
-              ? `共 ${slots.length} 段录音，每段对应一道跟读题`
-              : "逐题选择录音文件。"}
+              ? `自动识别：共 ${task.data.question_count} 题 / ${task.data.sentence_count} 句 / 满分 ${task.data.total_score}`
+              : "正在读取题目…"}
           </p>
         </div>
         <div className="page-actions">
@@ -145,49 +184,35 @@ export function ReadAloud() {
         </div>
       </header>
 
-      {!jobId && (
-        <EmptyState title="缺少作业编号" description="请从作业列表重新进入。" />
-      )}
+      {!jobId && <EmptyState title="缺少作业编号" description="请从作业列表重新进入。" />}
+      {task.isPending && Boolean(jobId) && <LoadingState label="正在解析题目…" />}
+      {task.isError && <ErrorState error={task.error} onRetry={() => task.refetch()} />}
 
-      {task.isPending && Boolean(jobId) && (
-        <LoadingState label="正在加载朗读任务…" />
-      )}
-
-      {task.isError && (
-        <ErrorState error={task.error} onRetry={() => task.refetch()} />
-      )}
-
-      <div className="banner banner--info" role="note">
-        <div>
-          <strong>提交说明</strong>
-          <span>
-            {dryRun
-              ? "当前为演练模式：只上传并校验录音，不向服务器提交成绩。可在设置中关闭演练。"
-              : ""}
-          </span>
+      {task.data?.expired && !submitted && (
+        <div className="banner banner--warning" role="note">
+          <strong>已过期</strong>
+          <span>服务端实测仍接受补交，可以继续上传并提交。</span>
         </div>
-      </div>
+      )}
 
-      {result && (
+      {submitted && (
         <div className="banner banner--success" role="status">
-          <strong>已生成提交预览</strong>
-          <span>
-            预览仅包含将要发送的内容，尚未向服务器提交成绩
-            {result.dry_run ? "" : "（注意：本次并非演练）"}。
-          </span>
+          <strong>已提交</strong>
+          <span>该作业的朗读成绩已经提交，服务端可能继续按录音复评。</span>
         </div>
       )}
 
-      {submit.isError && (
-        <div className="banner banner--danger" role="alert">
-          {errorMessage(submit.error)}
+      {confirmed && (
+        <div className="banner banner--success" role="status">
+          <strong>{confirmed.verified ? "提交成功" : "已发送，等待服务端刷新"}</strong>
+          <span>{confirmed.message}</span>
         </div>
       )}
 
       {task.isSuccess && slots.length === 0 && (
         <EmptyState
-          title="暂无朗读题目"
-          description="该作业不包含 question_type = 9 的题目。"
+          title="没有跟读题目"
+          description="该作业的题目包里没有 question_type = 9 的题目。"
         />
       )}
 
@@ -196,33 +221,53 @@ export function ReadAloud() {
           <div className="overall-row">
             <div style={{ flex: "1 1 240px" }}>
               <div className="field-hint">
-                已校验 {readyCount} / {slots.length}
+                已上传 {uploadedCount} / {slots.length}
               </div>
               <div className="progress-track" aria-hidden="true">
                 <div
                   className="progress-fill"
-                  style={{
-                    width: `${percent(readyCount, slots.length)}%`,
-                  }}
+                  style={{ width: `${percent(uploadedCount, slots.length)}%` }}
                 />
               </div>
             </div>
             <button
               type="button"
               className="button button--primary"
-              onClick={() => setConfirmOpen(true)}
-              disabled={!allReady || submit.isPending || result !== null}
+              onClick={() => previewMutation.mutate()}
+              disabled={
+                !allUploaded || submitted || previewMutation.isPending || confirmed !== null
+              }
             >
               <UploadIcon />
-              {result ? "已生成预览" : "生成提交预览"}
+              {previewMutation.isPending ? "准备中…" : "预览并提交"}
             </button>
+          </div>
+
+          {previewMutation.isError && (
+            <div className="banner banner--danger" role="alert">
+              {errorMessage(previewMutation.error)}
+            </div>
+          )}
+          {submitMutation.isError && (
+            <div className="banner banner--danger" role="alert">
+              {errorMessage(submitMutation.error)}
+            </div>
+          )}
+
+          <div className="banner banner--info" role="note">
+            <div>
+              <strong>计分说明</strong>
+              <span>
+                本机没有厂商的语音评分引擎，上报分数由你填写；服务端收到后可能按录音重新评分。
+              </span>
+            </div>
           </div>
 
           <div className="stack">
             {slots.map((slot) => {
               const status = statusFor(slot);
               const local = uploads[slot.question_id];
-              const inputId = `file-${slot.question_id}`;
+              const recordUrl = recordUrlFor(slot);
               return (
                 <article key={slot.question_id} className="read-card">
                   <div className="read-head">
@@ -233,39 +278,47 @@ export function ReadAloud() {
                     </span>
                   </div>
                   <p className="read-sentence">{slot.sentence}</p>
-                  {slot.audio_url && (
-                    <audio controls src={slot.audio_url} preload="none" />
-                  )}
+                  <p className="field-hint">
+                    {slot.sentences.length} 句 · 参考时长 {slot.duration}s · 满分 {slot.score}
+                  </p>
+                  {slot.audio_url && <audio controls src={slot.audio_url} preload="none" />}
                   <div className="read-controls">
-                    <label className="field-label" htmlFor={inputId}>
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() => void handlePick(slot)}
+                      disabled={submitted || status === "uploading"}
+                    >
                       选择 mp3
+                    </button>
+                    <label className="field-label" htmlFor={`score-${slot.question_id}`}>
+                      上报分数
                     </label>
                     <input
-                      id={inputId}
-                      className="file-input"
-                      type="file"
-                      accept="audio/mpeg,.mp3"
-                      disabled={status === "uploading"}
+                      id={`score-${slot.question_id}`}
+                      className="input"
+                      type="number"
+                      min={0}
+                      max={slot.score}
+                      step={0.5}
+                      value={scoreFor(slot)}
+                      disabled={submitted}
                       onChange={(event) => {
-                        const file = event.currentTarget.files?.[0];
-                        event.currentTarget.value = "";
-                        if (file) void handleFile(slot, file);
+                        const value = Number(event.currentTarget.value);
+                        setScores((previous) => ({
+                          ...previous,
+                          [slot.question_id]: Number.isFinite(value) ? value : 0,
+                        }));
                       }}
                     />
-                    {local?.fileName && (
-                      <span className="field-hint">{local.fileName}</span>
-                    )}
+                    {local?.fileName && <span className="field-hint">{local.fileName}</span>}
                   </div>
                   {local?.error && (
                     <p className="field-hint" role="alert">
                       {local.error}
                     </p>
                   )}
-                  {status === "uploaded" && (
-                    <p className="field-hint">
-                      录音已上传，可重新选择文件覆盖（同一题只使用最后一段）。
-                    </p>
-                  )}
+                  {recordUrl && <p className="field-hint">录音地址：{recordUrl}</p>}
                 </article>
               );
             })}
@@ -274,31 +327,32 @@ export function ReadAloud() {
       )}
 
       <ConfirmDialog
-        open={confirmOpen}
-        title="生成提交预览"
+        open={preview !== null}
+        title="确认提交朗读成绩"
         summary={
-          <>
-            <p>
-              将处理 {readyCount} 段录音。此操作只会生成将要发送的内容，不会
-              向服务器提交成绩。
-            </p>
-            <ul className="summary-list">
-              {slots
-                .filter((slot: ReadAloudSlot) => statusFor(slot) === "ready")
-                .slice(0, 8)
-                .map((slot) => (
+          preview ? (
+            <>
+              <p>
+                共 {preview.slots.length} 题，上报 {preview.reported_score} /{" "}
+                {preview.total_score} 分。提交后同一作业不能重复提交。
+              </p>
+              <ul className="summary-list">
+                {preview.slots.map((slot) => (
                   <li key={slot.question_id}>
-                    第 {slot.number} 题 · {slot.sentence}
+                    第 {slot.number} 题 · {slot.score} 分 · {slot.record_url}
                   </li>
                 ))}
-            </ul>
-          </>
+              </ul>
+            </>
+          ) : null
         }
-        confirmLabel="生成预览"
-        tone="default"
-        busy={submit.isPending}
-        onConfirm={() => submit.mutate()}
-        onCancel={() => setConfirmOpen(false)}
+        confirmLabel="确认提交"
+        tone="danger"
+        busy={submitMutation.isPending}
+        onConfirm={() => submitMutation.mutate()}
+        onCancel={() => {
+          if (!submitMutation.isPending) setPreview(null);
+        }}
       />
     </div>
   );

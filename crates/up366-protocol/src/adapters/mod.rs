@@ -24,8 +24,8 @@ pub use correction::{
 };
 pub use profile::{current_user, server_time, CurrentUser};
 pub use readaloud::{
-    preview_submission, submit_readaloud, upload_ticket, ReadAloudSlot, ReadAloudTaskView,
-    UploadTicket,
+    build_row, parse_paper, submit_readaloud, upload_object, upload_ticket, PaperQuestion,
+    ReadAloudContext, ReadAloudPaper, ReadAloudRecording, UploadTicket, READALOUD_SUBMIT_TYPE,
 };
 pub use wordpk::{submit_word_pk, WordPkSubmission};
 pub use words::bucket_words;

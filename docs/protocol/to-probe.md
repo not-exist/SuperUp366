@@ -32,34 +32,8 @@ production: a failed POST that still recorded the attempt would burn the task.
 
 ## 4. Read-aloud submission shape
 
-Confirmed by the archived live-payload analysis on `main`
-(`docs/plans/2026-11-03-readaloud-mp3-score-submit.md`, F1–F16):
-
-- Recording unit is the **question**, not the sentence.
-- Audio is uploaded to OSS first; the link the server reads lives in the paper
-  XML `<answer_url>` and in `qstJson[].elementAttr.record_url`. There is no
-  `objectIds`/`uuid` on the task row itself.
-- `objectName` is generated locally as
-  `storage{userType}/study/a/{yyyy/mm/dd}/{uid}/{file}`.
-- `ut` = `md5(ts)[..10] + md5(md5(payload) + "submitTaskToken-pc-987654" +
-  md5(ts)) + md5(ts)[10..]`, 64 chars.
-- OSS credentials come from `GET /front/aliyunoss/token/v2?organId={schoolId}`
-  and the upload is a `multipartUpload`.
-
-Still to pin for this client:
-
-1. Which of the three branches a given read-aloud task uses (A
-   `/client/task/score/submit/v2` with `submitType=8`, B
-   `/client/onlinetesting/submit` with no `ut`, C the gzip variant), since the
-   archived payloads are textbook tasks and may not cover homework.
-2. The exact `mark_datao` element numbering and read-aloud `qstJson` child
-   shape for a **homework** task.
-3. Whether the server asynchronously re-grades after submission (the archive
-   observed score changes), which must be reflected in the UI wording.
-
-Until 1–3 are pinned against a real homework task, the app stops at upload
-verification and dry-run: uploading audio is safe and reversible, submitting a
-score is not.
+Closed on 2026-11-09: two real homework submissions (one expired) were accepted
+by branch A. The confirmed facts now live in `confirmed.md` § "Read-aloud".
 
 ## 5. Job ordering
 

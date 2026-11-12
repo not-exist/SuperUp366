@@ -53,12 +53,18 @@ export const api = {
       job_id: jobId,
       recording: { question_id: questionId, path, file_name: fileName },
     }),
-  submitReadAloud: (accountId: string, jobId: string, dryRun: boolean) =>
-    invokeCommand("readaloud_submit", {
+  previewReadAloud: (
+    accountId: string,
+    jobId: string,
+    scores: { question_id: string; score: number }[],
+  ) =>
+    invokeCommand("readaloud_preview", {
       account_id: accountId,
       job_id: jobId,
-      dry_run: dryRun,
+      scores,
     }),
+  submitReadAloud: (confirmToken: string) =>
+    invokeCommand("readaloud_submit", { confirm_token: confirmToken }),
 
   getCorrectionOverview: (accountId: string) =>
     invokeCommand("correction_overview", { account_id: accountId }),

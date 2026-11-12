@@ -21,6 +21,7 @@ pub use state::{BookView, CourseView, JobView, StatusView};
 /// can report them.
 pub fn app(state: AppState) -> tauri::Builder<tauri::Wry> {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::accounts::accounts_list,
@@ -43,6 +44,7 @@ pub fn app(state: AppState) -> tauri::Builder<tauri::Wry> {
             commands::wordpk::wordpk_submit,
             commands::readaloud::readaloud_get,
             commands::readaloud::readaloud_upload,
+            commands::readaloud::readaloud_preview,
             commands::readaloud::readaloud_submit,
         ])
 }

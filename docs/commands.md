@@ -109,19 +109,29 @@ and the submit, taken from server time.
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `readaloud_get` | `account_id, job_id` | `ReadAloudTask` |
-| `readaloud_upload` | `account_id, job_id, recording{question_id, path, file_name}` | `ReadAloudUpload` |
-| `readaloud_submit` | `account_id, job_id, dry_run` | `ReadAloudPreview` |
+| `readaloud_get` | `account_id, job_id` | `ReadAloudTask` (auto-detected slots) |
+| `readaloud_upload` | `account_id, job_id, recording{question_id, path, file_name}` | `ReadAloudUpload` (real OSS URL) |
+| `readaloud_preview` | `account_id, job_id, scores?[]` | `ReadAloudPreview` (row + `confirm_token`) |
+| `readaloud_submit` | `confirm_token` | `ReadAloudSubmit` |
 
-Upload and submit are separate on purpose. Two limits are enforced in code, not
-just in copy:
+`readaloud_get` reads `paperId` from the cached job (falling back to
+`job/info`) and parses `paperData`. Every `question_type = 9` element becomes
+one slot, so the question/sentence counts are detected, never guessed. A paper
+that mixes read-aloud with other question types is refused.
 
-- `readaloud_upload` only **validates** the mp3 (header, size, hash). It
-  returns `record_url: null`, meaning the slot is "ready" — the OSS transfer is
-  not wired.
-- `readaloud_submit` returns a preview by default and the guarded protocol
-  layer refuses to send, because the submit branch, `mark_datao` numbering and
-  `qstJson` shape are not confirmed against a real homework task.
+`readaloud_upload` validates the mp3, uploads it to OSS with the STS
+credentials, and stores the resulting URL. Uploading again for the same
+question replaces the previous file.
+
+`readaloud_preview` requires a recording for every slot, builds the exact
+`tasksJson` row (including `studyTaskId = jobId`, `qstJson` and
+`answerdata/markdatao`) and returns it with a single-use token.
+`readaloud_submit` consumes the token, posts once to
+`/client/task/score/submit/v2`, then reads the finished-job list back.
+
+Expired jobs are not blocked: the server accepted a late submission during
+recon, so the UI only warns. The app has no vendor speech-scoring engine, so
+per-question scores are user-supplied and the server may re-grade them.
 
 ## Correction (error-notebook)
 

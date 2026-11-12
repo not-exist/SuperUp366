@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
 
-use crate::repos::{AccountsRepo, CacheRepo, SettingsRepo};
+use crate::repos::{AccountsRepo, AudioRepo, CacheRepo, SettingsRepo};
 use crate::Result;
 
 /// Current wall-clock time in Unix epoch milliseconds.
@@ -99,6 +99,11 @@ impl Database {
     /// Cached courses, jobs and job statuses.
     pub fn cache(&self) -> CacheRepo {
         CacheRepo::new(self.pool.clone())
+    }
+
+    /// Local recordings and their OSS destinations.
+    pub fn audio(&self) -> AudioRepo {
+        AudioRepo::new(self.pool.clone())
     }
 
     /// Application settings.

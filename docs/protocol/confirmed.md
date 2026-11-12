@@ -106,12 +106,32 @@ the job's `contentId`; passing `jobId` yields empty `paperInfo`. v2 requires
 
 ## Read-aloud
 
-- Question type marker: `question_type = 9`.
-- One recording per **question**, not per sentence.
-- Audio is uploaded to OSS first; the resulting URL/path is written into
-  `record_url` and `objectIds`, then the score payload is submitted. Audio is
-  never a direct field of the score endpoint.
-- OSS object name: `storage{userType}/study/a/{yyyy/mm/dd}/{uid}/{file}`.
+Verified against two live homework submissions (2026-11-03 and 2026-11-09),
+including one expired job the server still accepted.
+
+- Question type marker: `question_type = 9`; one recording per **question**,
+  not per sentence. The paper's `<attachment>` holds the sentences.
+- Paper source: `GET /client/paper/detail?paperId=`, `data.paperData` plus
+  `data.pathPrefix`.
+- OSS object name: `storage/{userType}/study/a/{yyyy/mm/dd}/{uid}/{file}`.
+  The date is local, `userType` is the account's `uType` (for example `102`).
+- OSS credentials: `GET /front/aliyunoss/token/v2?organId={schoolId}` returns a
+  **list** of `{biz, ossBucketInfo}`; recordings use `biz = up366`.
+- Upload is a signed `PUT` (Aliyun OSS V1): base64 `Content-MD5`, RFC 1123
+  `Date`, and `x-oss-security-token:{token}` included in the signature. A hex
+  MD5 or an unsigned security token is rejected with `403`.
+- Submit branch A: `POST /client/task/score/submit/v2`, form fields
+  `tasksJson`, `submitType = 8`, `ut`.
+- `studyTaskId` **must equal `jobId`**; `taskId = chapterId = contentId`.
+- `result` is a JSON string `{studentid, testInfo:{answerdata, markdatao}}`;
+  `answerdata` has one `<element id>` per question with `<answer_url>`,
+  `<answer_score>` and `<answer_recordsec>`; `markdatao` has one `<mark_data>`
+  per question.
+- `qstJson` is a flat **array**: one `elementType = 1` row per question and one
+  `elementType = 2` row per sentence (`{questionId}-{n}`).
+- Completion is the `studyTaskId` appearing in
+  `/client/student/all/course/finish/job/v2`; the server may asynchronously
+  re-grade the recording, so the reported score is not final.
 
 ## Error-notebook: correction
 

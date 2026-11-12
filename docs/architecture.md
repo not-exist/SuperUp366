@@ -25,8 +25,8 @@ src-tauri (commands)      validates input, scopes by account, emits events
     │
 up366-sync                aggregation, cache policy, submission workflows
     │
-up366-protocol            endpoint table, encoding, signatures, HTTP client
-up366-media               audio probing, OSS upload
+up366-protocol            endpoint table, encoding, signatures, HTTP client, OSS PUT
+up366-media               audio probing and object names
 up366-store               SQLite + OS credential store
     │
 up366-core                pure models: ids, status rules, kinds
