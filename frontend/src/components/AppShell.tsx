@@ -26,7 +26,7 @@ export function AppShell({ account }: { account: Account }) {
   const logout = useMutation({
     mutationFn: () => api.logout(account.account_id),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      await queryClient.invalidateQueries();
       navigate("/login", { replace: true });
     },
   });

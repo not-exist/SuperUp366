@@ -30,6 +30,9 @@ pub struct CurrentUser {
     /// School id, spelt `organId` upstream.
     #[serde(default, rename = "organId", deserialize_with = "flex::opt_string")]
     pub school_id: Option<String>,
+    /// Stage marker (`3` = high school), spelt `schoolType` upstream.
+    #[serde(default, rename = "schoolType", deserialize_with = "flex::opt_string")]
+    pub school_type: Option<String>,
 }
 
 /// Fetch the logged-in user's profile.

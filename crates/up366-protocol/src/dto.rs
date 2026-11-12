@@ -779,6 +779,9 @@ impl PaperDetail {
 pub struct Word {
     #[serde(default, deserialize_with = "flex::opt_string")]
     pub entry_id: Option<String>,
+    /// Older buckets omit `entryId` and identify the word by `pkid` instead.
+    #[serde(default, deserialize_with = "flex::opt_string")]
+    pub pkid: Option<String>,
     #[serde(default, deserialize_with = "flex::opt_string")]
     pub entry: Option<String>,
     #[serde(default, deserialize_with = "flex::opt_string")]
@@ -803,6 +806,14 @@ pub struct Word {
 pub const WORD_AUDIO_BASE: &str = "https://word-cdn-alyun.up366.cn";
 
 impl Word {
+    /// The id the server identifies this word by.
+    pub fn id(&self) -> Option<&str> {
+        self.entry_id
+            .as_deref()
+            .or(self.pkid.as_deref())
+            .filter(|id| !id.is_empty())
+    }
+
     /// Display translation, preferring `newPropList` over `paraphrase`.
     pub fn cn(&self) -> String {
         let mut parts = Vec::new();

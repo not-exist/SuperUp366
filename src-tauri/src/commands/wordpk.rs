@@ -1,13 +1,22 @@
-//! Word PK commands: preview a round, then submit it once.
+//! Word PK commands: draw a round from the bucket, then submit it once.
+//!
+//! The user supplies `score` (correct words) and `total` (drawn words). The
+//! client picks `total` distinct words from the task's `pkBucketId` bucket,
+//! marks the first `score` correct and the rest wrong, and shows that exact
+//! round before anything is sent.
 //!
 //! The two-step shape is required by the protocol: `-13` means "already
 //! submitted / attempts exhausted", and a burned attempt cannot be un-burned.
-//! So the picker shows the exact round (which words, which score) and only then
-//! submits, using a single-use token that the preview issued.
+//! So the preview carries the drawn round in its confirmation token: the submit
+//! step can neither be replayed nor pointed at different words.
 
 use serde::{Deserialize, Serialize};
-use up366_core::AccountId;
-use up366_protocol::{adapters, adapters::WordPkSubmission, dto::Word};
+use up366_core::{AccountId, RoundRequest};
+use up366_protocol::{
+    adapters,
+    adapters::WordPkSubmission,
+    dto::Word,
+};
 
 use crate::error::{AppError, CommandResult};
 use crate::session::AppState;
@@ -20,6 +29,8 @@ pub struct WordView {
     pub phonetic: String,
     pub translation: String,
     pub audio_url: Option<String>,
+    /// Whether this word is drawn as a correct answer.
+    pub correct: bool,
 }
 
 /// What the confirmation dialog shows before a round is submitted.
@@ -28,6 +39,13 @@ pub struct WordPkPreviewView {
     pub job_id: String,
     pub title: String,
     pub bucket_id: String,
+    /// Usable words the round was drawn from.
+    pub pool_size: usize,
+    /// Requested score, which is also the number of correct words.
+    pub score: usize,
+    /// Number of drawn words.
+    pub total: usize,
+    /// Drawn words in wire order: correct first, then wrong.
     pub words: Vec<WordView>,
     /// Token to pass back to `wordpk_submit`.
     pub confirm_token: String,
@@ -40,20 +58,22 @@ pub struct WordPkResult {
     pub message: String,
 }
 
-/// The user's answer for one word.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct WordPkAnswer {
-    pub word_id: String,
-    /// Whether the student got the word right.
-    pub known: bool,
-}
-
-/// A pending round, re-fetched from the bucket instead of trusting the client.
-#[derive(Debug, Clone)]
-struct Round {
+/// What a confirmation token carries: the round exactly as previewed.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct PendingRound {
+    job_id: String,
     course_id: String,
     bucket_id: String,
-    words: Vec<Word>,
+    score: usize,
+    correct: Vec<Word>,
+    wrong: Vec<Word>,
+}
+
+/// A word-PK task's bucket, resolved from the cached job row.
+#[derive(Debug, Clone)]
+struct Task {
+    course_id: String,
+    bucket_id: String,
 }
 
 /// Locate the word-PK task and its bucket from the cached job row.
@@ -61,7 +81,7 @@ struct Round {
 /// The bucket id lives in `extParam.xotParam.pkBucketId`, which is a JSON
 /// string nested inside another JSON string, so it is parsed defensively: a
 /// missing or malformed value is an error the user can act on, not a panic.
-fn round_for_job(job: &up366_store::JobRecord) -> CommandResult<Round> {
+fn task_for_job(job: &up366_store::JobRecord) -> CommandResult<Task> {
     let raw: serde_json::Value = serde_json::from_str(&job.raw_json)
         .map_err(|error| AppError::new("protocol_drift", error.to_string()))?;
 
@@ -77,10 +97,9 @@ fn round_for_job(job: &up366_store::JobRecord) -> CommandResult<Round> {
         .filter(|id| !id.is_empty())
         .ok_or_else(|| AppError::new("protocol_drift", "作业缺少 pkBucketId"))?;
 
-    Ok(Round {
+    Ok(Task {
         course_id: job.course_id.to_string(),
         bucket_id,
-        words: Vec::new(),
     })
 }
 
@@ -92,55 +111,92 @@ fn as_json_or_str(value: Option<&serde_json::Value>) -> Option<serde_json::Value
     }
 }
 
-/// Load the bucket and build the picker view.
+/// Draw a round: `score` correct words out of `total` randomly picked words.
 ///
-/// Deliberately does not submit: the caller shows this and asks. A one-shot
-/// token is returned so the submit step cannot be replayed.
+/// Deliberately does not submit: the caller shows this and asks. The drawn
+/// round is stored in the one-shot token, so the submit step cannot be replayed
+/// and cannot submit a different round than the one previewed.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn wordpk_preview(
     account_id: String,
     job_id: String,
+    score: usize,
+    total: usize,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<WordPkPreviewView> {
     let (active, client) = state.require_client(Some(&account_id))?;
-    let job = find_job(&state, &active, &job_id).await?;
-    let mut round = round_for_job(&job)?;
+    let job = match find_job(&state, &active, &job_id).await {
+        Ok(job) => job,
+        // A direct link or a cleared cache must not fail the picker: refresh the
+        // catalog once, then look the job up again.
+        Err(error) if error.code == "not_found" => {
+            crate::commands::catalog::refresh_catalog(&state, &active, &client).await?;
+            find_job(&state, &active, &job_id).await?
+        }
+        Err(error) => return Err(error),
+    };
+    let task = task_for_job(&job)?;
 
-    round.words = adapters::bucket_words(&client, &round.bucket_id)
-        .await
-        .map_err(|error| state.session_error(&active, &client, error))?;
-    if round.words.is_empty() {
-        return Err(AppError::new("api_error", "词库为空"));
+    let pool = usable_words(
+        adapters::bucket_words(&client, &task.bucket_id)
+            .await
+            .map_err(|error| state.session_error(&active, &client, error))?,
+    );
+    if pool.is_empty() {
+        return Err(AppError::new("api_error", "词库为空或单词缺少 entryId"));
     }
 
+    let request = RoundRequest { score, total }.validate(pool.len())?;
+    let picked = up366_core::draw_word_pk(request, pool.len(), seed());
+    let drawn: Vec<Word> = picked.iter().map(|&index| pool[index].clone()).collect();
+    let (correct, wrong) = drawn.split_at(request.score);
+
+    let drawn_at = adapters::server_time(&client)
+        .await
+        .unwrap_or_else(|_| up366_store::now_millis());
+    let pending = PendingRound {
+        job_id: job_id.clone(),
+        course_id: task.course_id.clone(),
+        bucket_id: task.bucket_id.clone(),
+        score: request.score,
+        correct: correct.to_vec(),
+        wrong: wrong.to_vec(),
+    };
+    let payload = serde_json::to_value(&pending)
+        .map_err(|error| AppError::new("storage_error", error.to_string()))?;
     let confirm_token = state.confirmations.issue(crate::confirm::PendingWrite {
         account_id: active,
         operation: "word_pk",
         payload: serde_json::json!({
             "jobId": job_id,
-            "courseId": round.course_id,
-            "bucketId": round.bucket_id,
+            "courseId": task.course_id,
+            "bucketId": task.bucket_id,
+            "score": request.score,
+            "round": payload,
+            "drawnAt": drawn_at,
         }),
     });
 
     Ok(WordPkPreviewView {
         job_id,
         title: job.name.clone(),
-        bucket_id: round.bucket_id.clone(),
-        words: round.words.iter().map(word_view).collect(),
+        bucket_id: task.bucket_id,
+        pool_size: pool.len(),
+        score: request.score,
+        total: request.total,
+        words: drawn
+            .iter()
+            .enumerate()
+            .map(|(index, word)| word_view(word, index < request.score))
+            .collect(),
         confirm_token,
     })
 }
 
-/// Submit the round the user confirmed.
-///
-/// The token is consumed first, so a double click or a stale retry fails
-/// without touching the server. The bucket is re-read at submit time so the
-/// submitted words are the words the server still returns.
+/// Submit the round the user confirmed. The token is consumed before the write.
 #[tauri::command(rename_all = "snake_case")]
 pub async fn wordpk_submit(
     confirm_token: String,
-    answers: Vec<WordPkAnswer>,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<WordPkResult> {
     let (account_id, client) = state.require_client(None)?;
@@ -159,26 +215,45 @@ pub async fn wordpk_submit(
             }
         })?;
 
-    let bucket_id = pending
+    let round: PendingRound = pending
         .payload
-        .get("bucketId")
-        .and_then(|value| value.as_str())
-        .ok_or_else(|| AppError::new("confirmation_expired", "确认内容不完整"))?
-        .to_owned();
+        .get("round")
+        .cloned()
+        .ok_or_else(|| AppError::new("confirmation_expired", "确认内容不完整"))
+        .and_then(|value| {
+            serde_json::from_value(value)
+                .map_err(|_| AppError::new("confirmation_expired", "确认内容不完整"))
+        })?;
+    if round.correct.is_empty() && round.wrong.is_empty() {
+        return Err(AppError::new("confirmation_expired", "确认内容不完整"));
+    }
 
-    let words = adapters::bucket_words(&client, &bucket_id)
+    let now = adapters::server_time(&client)
         .await
-        .map_err(|error| state.session_error(&account_id, &client, error))?;
-    let (correct, wrong) = split_words(&words, &answers)?;
+        .unwrap_or_else(|_| up366_store::now_millis());
+    let drawn_at = pending
+        .payload
+        .get("drawnAt")
+        .and_then(|value| value.as_i64())
+        .unwrap_or(now);
+    let seconds = if drawn_at > 0 && now > drawn_at {
+        (now - drawn_at) / 1000
+    } else {
+        0
+    };
 
-    // The score is the number of correct words; send exactly that.
     let submission = WordPkSubmission {
-        course_id: course_id_of(&pending),
-        study_task_id: job_id_of(&pending),
-        correct: correct.clone(),
-        wrong: wrong.clone(),
-        score: correct.len() as i64,
-        duration: String::new(),
+        course_id: round.course_id,
+        study_task_id: round.job_id,
+        correct: round.correct.clone(),
+        wrong: round.wrong.clone(),
+        score: round.score as i64,
+        duration: if seconds > 0 {
+            seconds.to_string()
+        } else {
+            String::new()
+        },
+        role_name: "Red".to_owned(),
     };
 
     let data = adapters::submit_word_pk(&client, &submission)
@@ -190,27 +265,13 @@ pub async fn wordpk_submit(
         message: if data.is_null() {
             "服务器未返回结果".to_owned()
         } else {
-            "提交成功".to_owned()
+            format!(
+                "提交成功：{} 词，答对 {} 个",
+                round.correct.len() + round.wrong.len(),
+                round.correct.len()
+            )
         },
     })
-}
-
-fn course_id_of(pending: &crate::confirm::PendingWrite) -> String {
-    pending
-        .payload
-        .get("courseId")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default()
-        .to_owned()
-}
-
-fn job_id_of(pending: &crate::confirm::PendingWrite) -> String {
-    pending
-        .payload
-        .get("jobId")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default()
-        .to_owned()
 }
 
 /// Find a cached job row by id across all courses.
@@ -230,10 +291,10 @@ async fn find_job(
         .ok_or_else(|| AppError::new("not_found", "作业不在缓存中，请先刷新作业列表"))
 }
 
-/// Render one bucket word.
-fn word_view(word: &Word) -> WordView {
+/// Render one drawn word.
+fn word_view(word: &Word, correct: bool) -> WordView {
     WordView {
-        word_id: word.entry_id.clone().unwrap_or_default(),
+        word_id: word.id().unwrap_or_default().to_owned(),
         word: word.entry.clone().unwrap_or_default(),
         phonetic: word
             .us_phonetic
@@ -245,39 +306,35 @@ fn word_view(word: &Word) -> WordView {
             .us_voice_file
             .clone()
             .or_else(|| word.en_voice_file.clone()),
+        correct,
     }
 }
 
-/// Split answers into correct and wrong buckets.
+/// Keep unique words the server can identify by id.
 ///
-/// Unknown and duplicate ids are both rejected: a round built from words the
-/// server did not return would be a corrupt submission.
-fn split_words(words: &[Word], answers: &[WordPkAnswer]) -> CommandResult<(Vec<Word>, Vec<Word>)> {
-    let mut correct = Vec::new();
-    let mut wrong = Vec::new();
+/// A bucket normally returns `entryId`; a few older buckets use `pkid`. A word
+/// with neither cannot be submitted, so it is dropped rather than producing a
+/// broken payload.
+fn usable_words(words: Vec<Word>) -> Vec<Word> {
     let mut seen = std::collections::HashSet::new();
+    let mut kept = Vec::with_capacity(words.len());
+    for word in words {
+        let Some(id) = word.id() else { continue };
+        if seen.insert(id.to_owned()) {
+            kept.push(word);
+        }
+    }
+    kept
+}
 
-    for answer in answers {
-        if !seen.insert(answer.word_id.as_str()) {
-            return Err(AppError::new("invalid_input", "同一单词被重复作答"));
-        }
-        let word = words
-            .iter()
-            .find(|word| word.entry_id.as_deref() == Some(answer.word_id.as_str()))
-            .cloned()
-            .ok_or_else(|| {
-                AppError::new("invalid_input", format!("未知单词: {}", answer.word_id))
-            })?;
-        if answer.known {
-            correct.push(word);
-        } else {
-            wrong.push(word);
-        }
-    }
-    if correct.is_empty() && wrong.is_empty() {
-        return Err(AppError::new("invalid_input", "没有任何作答"));
-    }
-    Ok((correct, wrong))
+/// A fresh seed per draw: two previews of the same task must not pick the same
+/// words, or the round the user confirmed could be replayed by a second open.
+fn seed() -> u64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos() as u64)
+        .unwrap_or(0);
+    nanos ^ (std::process::id() as u64).rotate_left(32)
 }
 
 #[cfg(test)]
@@ -297,68 +354,6 @@ mod tests {
     }
 
     #[test]
-    fn answers_are_split_by_known_flag() {
-        let (correct, wrong) = split_words(
-            &words(3),
-            &[
-                WordPkAnswer {
-                    word_id: "e0".into(),
-                    known: true,
-                },
-                WordPkAnswer {
-                    word_id: "e1".into(),
-                    known: false,
-                },
-                WordPkAnswer {
-                    word_id: "e2".into(),
-                    known: true,
-                },
-            ],
-        )
-        .unwrap();
-        assert_eq!(correct.len(), 2);
-        assert_eq!(wrong.len(), 1);
-    }
-
-    #[test]
-    fn an_answer_for_a_word_not_in_the_bucket_is_rejected() {
-        let error = split_words(
-            &words(1),
-            &[WordPkAnswer {
-                word_id: "missing".into(),
-                known: true,
-            }],
-        )
-        .unwrap_err();
-        assert_eq!(error.code, "invalid_input");
-    }
-
-    #[test]
-    fn the_same_word_answered_twice_is_rejected() {
-        let error = split_words(
-            &words(1),
-            &[
-                WordPkAnswer {
-                    word_id: "e0".into(),
-                    known: true,
-                },
-                WordPkAnswer {
-                    word_id: "e0".into(),
-                    known: false,
-                },
-            ],
-        )
-        .unwrap_err();
-        assert_eq!(error.code, "invalid_input");
-    }
-
-    #[test]
-    fn an_empty_round_is_rejected_before_any_request() {
-        let error = split_words(&words(2), &[]).unwrap_err();
-        assert_eq!(error.code, "invalid_input");
-    }
-
-    #[test]
     fn word_view_prefers_us_phonetic_and_audio() {
         let word: Word = serde_json::from_value(serde_json::json!({
             "entryId": "e1",
@@ -368,9 +363,31 @@ mod tests {
             "usVoiceFile": "a.mp3"
         }))
         .unwrap();
-        let view = word_view(&word);
+        let view = word_view(&word, true);
         assert_eq!(view.phonetic, "/ˈæpəl/");
         assert_eq!(view.audio_url.as_deref(), Some("a.mp3"));
+        assert!(view.correct);
+    }
+
+    #[test]
+    fn usable_words_drops_missing_ids_and_duplicates() {
+        let mut all = words(2);
+        all.push(serde_json::from_value(serde_json::json!({"entry": "no-id"})).unwrap());
+        all.push(serde_json::from_value(serde_json::json!({"entryId": "e0"})).unwrap());
+        let kept = usable_words(all);
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].id(), Some("e0"));
+    }
+
+    #[test]
+    fn usable_words_accepts_the_pkid_fallback() {
+        let all = vec![
+            serde_json::from_value(serde_json::json!({"pkid": "p1", "entry": "apple"})).unwrap(),
+            serde_json::from_value(serde_json::json!({"entryId": "", "entry": "pear"})).unwrap(),
+        ];
+        let kept = usable_words(all);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].id(), Some("p1"));
     }
 
     #[test]
@@ -389,9 +406,9 @@ mod tests {
             .to_string(),
             fetched_at: 0,
         };
-        let round = round_for_job(&job).unwrap();
-        assert_eq!(round.bucket_id, "BUCKET-1");
-        assert_eq!(round.course_id, "9222783");
+        let task = task_for_job(&job).unwrap();
+        assert_eq!(task.bucket_id, "BUCKET-1");
+        assert_eq!(task.course_id, "9222783");
     }
 
     #[test]
@@ -407,6 +424,23 @@ mod tests {
             raw_json: serde_json::json!({"extParam": "{}"}).to_string(),
             fetched_at: 0,
         };
-        assert_eq!(round_for_job(&job).unwrap_err().code, "protocol_drift");
+        assert_eq!(task_for_job(&job).unwrap_err().code, "protocol_drift");
+    }
+
+    #[test]
+    fn a_pending_round_round_trips_through_the_token_payload() {
+        let pending = PendingRound {
+            job_id: "JOB-1".to_owned(),
+            course_id: "9222783".to_owned(),
+            bucket_id: "BUCKET-1".to_owned(),
+            score: 1,
+            correct: words(1),
+            wrong: words(1),
+        };
+        let value = serde_json::to_value(&pending).unwrap();
+        let back: PendingRound = serde_json::from_value(value).unwrap();
+        assert_eq!(back.score, 1);
+        assert_eq!(back.job_id, "JOB-1");
+        assert_eq!(back.correct.len() + back.wrong.len(), 2);
     }
 }

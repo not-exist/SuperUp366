@@ -83,11 +83,9 @@ Every destructive path follows the same shape:
 2. Show a preview: what will be sent, to which endpoint, how many items.
 3. Ask for confirmation; the backend issues a single-use token with a TTL.
 4. Execute once, then read the state back to verify.
-5. Record the outcome per item so a partial failure can be resumed.
 
-Batch operations (wrong-note cleanup) run serially and stop after three
-consecutive failures. A timeout is recorded as `unknown` and is never retried
-automatically.
+A batch write is submitted once behind its single-use token. A timeout is
+recorded as `unknown` and is never retried automatically.
 
 ## Performance
 

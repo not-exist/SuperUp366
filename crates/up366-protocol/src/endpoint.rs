@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 pub enum BodyKind {
     /// `application/x-www-form-urlencoded` POST.
     Form,
+    /// `application/json` POST.
+    Json,
+    /// `application/json` POST with a gzipped body (`Content-Encoding: gzip`).
+    JsonGzip,
     /// GET with query parameters.
     Query,
     /// No body.
@@ -67,7 +71,7 @@ const WORDSBTL_API: &str = "https://wordsbtl-api.up366.cn";
 const STUDY_API: &str = "https://study-api.up366.cn";
 const SETUP_API: &str = "https://setup-api.up366.cn";
 const USER_API: &str = "https://user-api.up366.cn";
-const WRONGNOTE_API: &str = "https://wrongnote-api.up366.cn";
+const ERROR_NOTEBOOK_API: &str = "https://error-notebook-api.up366.cn";
 
 /// Endpoints used by this client.
 ///
@@ -216,60 +220,42 @@ pub const ENDPOINTS: &[Endpoint] = &[
         false,
         BodyKind::Form,
     ),
-    // --- wrong-answer book -------------------------------------------
+    // --- error-notebook correction -----------------------------------
     ep(
-        "wrong_subjects",
-        WRONGNOTE_API,
-        "/client/wrongnote/student/subject/list",
+        "pm_overview",
+        ERROR_NOTEBOOK_API,
+        "/client/personalmistake/overview",
+        false,
+        BodyKind::Json,
+    ),
+    ep(
+        "pm_correction_draw",
+        ERROR_NOTEBOOK_API,
+        "/client/personalmistake/correction/draw",
         false,
         BodyKind::Form,
     ),
     ep(
-        "wrong_subject_stat",
-        WRONGNOTE_API,
-        "/client/wrongnote/student/subject/stat",
+        "pm_correction_status",
+        ERROR_NOTEBOOK_API,
+        "/client/personalmistake/correction/status",
         false,
         BodyKind::Form,
     ),
+    // The correction answer page submits through the Electron main process,
+    // which gzips the JSON body. The plain `/submit/v2` is a different branch.
     ep(
-        "wrong_books",
-        WRONGNOTE_API,
-        "/client/wrongnote/student/book/list",
-        false,
-        BodyKind::Form,
+        "task_score_gzip_submit",
+        STUDY_API,
+        "/client/task/score/gzip/submit",
+        true,
+        BodyKind::JsonGzip,
     ),
+    // "错题消灭" follow-up: `jobJson` is a JSON string.
     ep(
-        "wrong_knowledge",
-        WRONGNOTE_API,
-        "/client/wrongnote/student/knowledge/list/v3",
-        false,
-        BodyKind::Form,
-    ),
-    ep(
-        "wrong_courses",
-        WRONGNOTE_API,
-        "/client/wrongnote/student/course/list",
-        false,
-        BodyKind::Form,
-    ),
-    ep(
-        "wrong_question_show",
-        WRONGNOTE_API,
-        "/client/wrongnote/student/question/show",
-        false,
-        BodyKind::Form,
-    ),
-    ep(
-        "wrong_kill_paper",
-        WRONGNOTE_API,
-        "/client/wrongnote/student/questions/kill",
-        false,
-        BodyKind::Form,
-    ),
-    ep(
-        "submit_wrong_question",
-        WRONGNOTE_API,
-        "/client/wrongnote/student/question/submit",
+        "job_submit",
+        STUDY_API,
+        "/client/job/submit",
         true,
         BodyKind::Form,
     ),
@@ -328,7 +314,8 @@ mod tests {
                 "login",
                 "word_pk_submit",
                 "task_score_submit",
-                "submit_wrong_question"
+                "task_score_gzip_submit",
+                "job_submit"
             ]
         );
     }

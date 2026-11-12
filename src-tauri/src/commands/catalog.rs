@@ -5,7 +5,9 @@ use std::sync::OnceLock;
 use chrono::Utc;
 use regex::Regex;
 use serde::Deserialize;
-use up366_protocol::{adapters, dto::Course};
+use up366_core::AccountId;
+use up366_protocol::{adapters, dto::Course, Client};
+use up366_store::{CourseRecord, JobRecord};
 
 use crate::error::CommandResult;
 use crate::session::AppState;
@@ -54,24 +56,64 @@ pub async fn jobs_list(
 ) -> CommandResult<Vec<JobView>> {
     let (account_id, client) = state.require_client(Some(&account_id))?;
     let _ = refresh;
-    let courses = adapters::courses(&client)
+    let mut rows = refresh_catalog(&state, &account_id, &client).await?;
+
+    if let Some(filter) = filter {
+        rows.retain(|row| row_matches(row, &filter));
+    }
+    Ok(rows)
+}
+
+/// Fetch the catalog and persist it before returning the rows.
+///
+/// The answer and word-PK views resolve `contentId` / `bookId` from the cached
+/// job row, so the list is also the write path for that cache. A course that
+/// fails transiently is skipped, but a rejected session stops the refresh.
+pub(crate) async fn refresh_catalog(
+    state: &AppState,
+    account_id: &AccountId,
+    client: &Client,
+) -> CommandResult<Vec<JobView>> {
+    let courses = adapters::courses(client)
         .await
-        .map_err(|error| state.session_error(&account_id, &client, error))?;
+        .map_err(|error| state.session_error(account_id, client, error))?;
+
+    let fetched_at = up366_store::now_millis();
+    let course_records: Vec<CourseRecord> = courses
+        .iter()
+        .enumerate()
+        .filter_map(|(index, course)| {
+            Some(CourseRecord {
+                course_id: up366_core::CourseId::from(course.id()?),
+                name: course.name().to_owned(),
+                order_index: index as i64,
+                raw_json: serde_json::to_string(&course.raw).unwrap_or_default(),
+                fetched_at,
+            })
+        })
+        .collect();
+    state
+        .db
+        .cache()
+        .upsert_courses(account_id, &course_records)
+        .await
+        .map_err(storage_error)?;
 
     // The finished/returned rows are account-wide: the endpoint ignores
     // `courseId` and returns the same rows for every course, so one call per
     // refresh covers them all.
     let finished = match courses.first().and_then(Course::id) {
         Some(course_id) => FinishedIndex::new(
-            &adapters::course_finished_jobs(&client, course_id)
+            &adapters::course_finished_jobs(client, course_id)
                 .await
-                .map_err(|error| state.session_error(&account_id, &client, error))?,
+                .map_err(|error| state.session_error(account_id, client, error))?,
         ),
         None => FinishedIndex::default(),
     };
     let now = Utc::now();
 
     let mut rows: Vec<JobView> = Vec::new();
+    let mut job_records: Vec<JobRecord> = Vec::new();
     for (index, course) in courses.iter().enumerate() {
         let Some(course_id) = course.id() else {
             continue;
@@ -80,14 +122,14 @@ pub async fn jobs_list(
 
         // One course failing must not empty the whole list, but a rejected
         // session is not a course failure: stop and ask for the password.
-        let jobs = match adapters::jobs(&client, course_id).await {
+        let jobs = match adapters::jobs(client, course_id).await {
             Ok(jobs) => jobs,
             Err(error) if client.is_expired() => {
-                return Err(state.session_error(&account_id, &client, error));
+                return Err(state.session_error(account_id, client, error));
             }
             Err(_) => continue,
         };
-        for job in &jobs {
+        for (order, job) in jobs.iter().enumerate() {
             let job_state = finished.state(job, now);
             let score = match job_state {
                 up366_core::JobState::Finished { score } => score,
@@ -101,13 +143,47 @@ pub async fn jobs_list(
                 false,
                 Some(job_state),
             ));
+            if let Some(record) = job_record(course_id, job, order, fetched_at) {
+                job_records.push(record);
+            }
         }
     }
 
-    if let Some(filter) = filter {
-        rows.retain(|row| row_matches(row, &filter));
-    }
+    state
+        .db
+        .cache()
+        .upsert_jobs(account_id, &job_records)
+        .await
+        .map_err(storage_error)?;
     Ok(rows)
+}
+
+/// One job as it is cached for the detail views.
+///
+/// The answer endpoint needs `contentId` and `bookId`, which only the job
+/// payload carries; keeping them here is what lets `answer_get` resolve a job
+/// without a second upstream lookup.
+fn job_record(
+    course_id: &str,
+    job: &up366_protocol::dto::Job,
+    order: usize,
+    fetched_at: i64,
+) -> Option<JobRecord> {
+    Some(JobRecord {
+        course_id: up366_core::CourseId::from(course_id),
+        job_id: up366_core::JobId::from(job.id()?),
+        content_id: job.content().map(str::to_owned),
+        book_id: job.book().map(str::to_owned),
+        chapter_id: job.chapter_id.clone(),
+        name: job.title().to_owned(),
+        order_index: order as i64,
+        raw_json: serde_json::to_string(&job.raw).unwrap_or_default(),
+        fetched_at,
+    })
+}
+
+fn storage_error(error: up366_store::StoreError) -> crate::error::AppError {
+    crate::error::AppError::new("storage_error", error.to_string())
 }
 
 /// Local-only filtering; ordering is untouched.
@@ -200,6 +276,28 @@ mod tests {
         let view = course_view(&course("2028届17班"), 0);
         assert_eq!(view.label(), "2028届17班");
         assert_eq!(view.teacher_name, None);
+    }
+
+    #[test]
+    fn a_cached_job_keeps_the_ids_the_answer_view_needs() {
+        let job = up366_protocol::dto::Job::from_value(json!({
+            "jobId": "JOB-1",
+            "jobName": "Unit 4",
+            "contentId": "CONTENT-1",
+            "extParam": { "bookId": "BOOK-1", "chapterId": "CH-1", "taskStatus": 0 }
+        }))
+        .unwrap();
+
+        let record = job_record("COURSE-1", &job, 2, 99).unwrap();
+
+        // The job id is not the task id: the answer endpoint needs contentId.
+        assert_eq!(record.job_id.as_str(), "JOB-1");
+        assert_eq!(record.content_id.as_deref(), Some("CONTENT-1"));
+        assert_eq!(record.book_id.as_deref(), Some("BOOK-1"));
+        assert_eq!(record.chapter_id.as_deref(), Some("CH-1"));
+        assert_eq!(record.name, "Unit 4");
+        assert_eq!(record.order_index, 2);
+        assert_eq!(record.fetched_at, 99);
     }
 
     #[test]

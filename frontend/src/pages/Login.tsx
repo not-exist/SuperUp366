@@ -25,7 +25,9 @@ export function Login() {
   const switchAccount = useMutation({
     mutationFn: (accountId: string) => api.switchAccount(accountId),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      // Drop every cached page: another account's counts must never leak into
+      // this session.
+      await queryClient.invalidateQueries();
       navigate("/jobs", { replace: true });
     },
   });
@@ -33,7 +35,8 @@ export function Login() {
   const login = useMutation({
     mutationFn: () => api.login(username.trim(), password),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      // A re-login must not keep the counts cached before the session expired.
+      await queryClient.invalidateQueries();
       setPassword("");
       setFormOpen(false);
       navigate("/jobs", { replace: true });

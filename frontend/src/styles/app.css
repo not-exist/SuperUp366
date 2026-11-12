@@ -1341,6 +1341,78 @@ dialog.dialog::backdrop {
   }
 }
 
+/* --- correction ------------------------------------------------------ */
+
+.correction-panel {
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.correction-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.correction-title {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 680;
+}
+
+.correction-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.correction-stats strong {
+  color: var(--color-text);
+  font-size: 15px;
+}
+
+.section-heading {
+  flex-basis: 100%;
+  margin-bottom: 4px;
+}
+
+.correction-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.correction-controls .field {
+  min-width: 120px;
+}
+
+.correction-preview {
+  margin-top: 16px;
+}
+
+.correction-preview .wrong-list {
+  margin-top: 10px;
+}
+
+.correction-preview .wrong-item {
+  display: block;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.correction-preview .wrong-item:last-child {
+  border-bottom: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -12,9 +12,12 @@ import type {
   Book,
   BookDetail,
   BookJob,
-  CleanupPreview,
-  CleanupRun,
   CommandMap,
+  CorrectionDraw,
+  CorrectionOverview,
+  CorrectionQuestion,
+  CorrectionStatus,
+  CorrectionSubmit,
   Course,
   JobRow,
   JobStatus,
@@ -25,9 +28,6 @@ import type {
   Settings,
   WordPkPreview,
   WordPkResult,
-  WrongKnowledge,
-  WrongNote,
-  WrongSubject,
 } from "./types";
 
 const DAY = 86_400_000;
@@ -291,25 +291,24 @@ function buildAnswer(jobId: string, title: string): AnswerDocument {
   };
 }
 
-// --- wrong notes ------------------------------------------------------
+// --- correction -------------------------------------------------------
 
-let wrongNotes: WrongNote[] = Array.from({ length: 14 }, (_, index) => {
-  const job = jobs[index % jobs.length];
-  return {
-    question_id: `wn-${index + 1}`,
-    job_id: job.job_id,
-    course_id: job.course_id,
-    class_name: job.class_name,
-    title: job.name,
-    question_type: index % 5 === 0 ? "听力选择" : "单项选择",
+let mockCorrectionRemaining = 12;
+let mockCorrectionDraws = 0;
+let mockDrawn: CorrectionQuestion[] = [];
+
+const correctionSeeds: CorrectionQuestion[] = Array.from(
+  { length: 6 },
+  (_, index) => ({
+    question_id: `mock-cq-${index + 1}`,
+    number: String(index + 1),
+    question_type: index % 3 === 0 ? "4" : "1",
+    type_name: index % 3 === 0 ? "填空题" : "单项选择",
+    score: index % 3 === 0 ? 1 : 2,
     stem: answerStems[index % answerStems.length],
-    correct_answer: ["A", "B", "C", "D"][index % 4],
-    student_answer: ["B", "C", "D", "A"][index % 4],
-    added_at: iso(-(index + 1)),
-  };
-});
-
-let mockCleanupIds: string[] = [];
+    answer: index % 3 === 0 ? "assumptions" : "A. 第一项；B. 第二项",
+  }),
+);
 
 // --- word pk ----------------------------------------------------------
 
@@ -328,22 +327,39 @@ const wordSeeds: Array<[string, string, string]> = [
   ["confuse", "/kənˈfjuːz/", "使困惑"],
 ];
 
-function wordPkPreview(jobId: string): WordPkPreview {
+function wordPkPreview(
+  jobId: string,
+  score: number,
+  total: number,
+): WordPkPreview {
   const job = jobs.find((row) => row.job_id === jobId);
+  const pool = wordSeeds.map(([word, phonetic, translation], index) => ({
+    word_id: `${jobId}-w${index + 1}`,
+    word,
+    phonetic,
+    translation,
+    audio_url: null,
+  }));
+  if (total <= 0 || score > total || total > pool.length) {
+    throw {
+      code: "invalid_input",
+      message:
+        total > pool.length
+          ? `词库只有 ${pool.length} 个可用单词，不足以抽取 ${total} 个`
+          : "分数不能大于 total",
+      retryable: false,
+    };
+  }
+  const picked = [...pool].sort(() => Math.random() - 0.5).slice(0, total);
   return {
     job_id: jobId,
     title: job?.name ?? "单词 PK",
     bucket_id: `bucket-${hash(jobId) % 1000}`,
-    my_score: 7,
-    opponent_score: 5,
+    pool_size: pool.length,
+    score,
+    total,
     confirm_token: "mock-wordpk-token",
-    words: wordSeeds.map(([word, phonetic, translation], index) => ({
-      word_id: `${jobId}-w${index + 1}`,
-      word,
-      phonetic,
-      translation,
-      audio_url: null,
-    })),
+    words: picked.map((word, index) => ({ ...word, correct: index < score })),
   };
 }
 
@@ -497,18 +513,25 @@ export async function handleMock(
     }
 
     case "wordpk_preview": {
-      const { job_id } = args as CommandMap["wordpk_preview"]["args"];
+      const { job_id, score, total } =
+        args as CommandMap["wordpk_preview"]["args"];
       await latency();
-      return wordPkPreview(job_id);
+      return wordPkPreview(job_id, score, total);
     }
 
     case "wordpk_submit": {
       await sleep(620);
-      const { answers } = args as CommandMap["wordpk_submit"]["args"];
-      const known = answers.filter((answer) => answer.known).length;
+      const { confirm_token } = args as CommandMap["wordpk_submit"]["args"];
+      if (confirm_token !== "mock-wordpk-token") {
+        throw {
+          code: "confirmation_expired",
+          message: "确认已过期或已使用，请重新抽取",
+          retryable: false,
+        };
+      }
       return {
         ok: true,
-        message: `已提交 ${answers.length} 个单词，其中 ${known} 个标记为已掌握（预览环境）。`,
+        message: "提交成功（预览环境，未发送到服务器）。",
       } satisfies WordPkResult;
     }
 
@@ -548,83 +571,82 @@ export async function handleMock(
       } satisfies ReadAloudPreview;
     }
 
-    case "wrongnotes_subjects": {
+    case "correction_overview": {
       await latency();
-      return [
-        {
-          subject_id: "2",
-          subject_name: "英语",
-          wrong_count: 7,
-          killed_count: 12,
-        },
-      ] satisfies WrongSubject[];
-    }
-
-    case "wrongnotes_knowledge": {
-      await latency();
-      return [
-        {
-          knowledge_id: "K1",
-          knowledge_name: "动词时态",
-          qtype_id: "5",
-          qtype_name: "选择题",
-          wrong_count: 3,
-        },
-      ] satisfies WrongKnowledge[];
-    }
-
-    case "wrongnotes_pending": {
-      await latency();
-      const start = 0;
-      return wrongNotes
-        .slice(start, start + 20)
-        .map((note) => ({ ...note }));
-    }
-
-    case "wrongnotes_preview": {
-      const { question_ids } = args as CommandMap["wrongnotes_preview"]["args"];
-      await sleep(260);
-      const selected = wrongNotes.filter((note) =>
-        question_ids.includes(note.question_id),
-      );
-      mockCleanupIds = selected.map((note) => note.question_id);
       return {
-        total: selected.length,
-        items: selected.map((note) => ({
-          question_id: note.question_id,
-          title: `${note.title} · ${note.question_type}`,
-        })),
-        confirm_token: "mock-confirm-token",
-      } satisfies CleanupPreview;
+        remaining_count: mockCorrectionRemaining,
+        corrected_count: 482,
+        today_corrected_count: 3,
+        groups: [
+          {
+            group_key: "mock-group-1",
+            remaining_count: mockCorrectionRemaining,
+            qtype_name: "填空题",
+            knowledge_name: "--",
+          },
+        ],
+      } satisfies CorrectionOverview;
     }
 
-    case "wrongnotes_cleanup": {
-      const { confirm_token } = args as CommandMap["wrongnotes_cleanup"]["args"];
-      if (confirm_token !== "mock-confirm-token") {
+    case "correction_draw": {
+      await latency();
+      const { count } = args as CommandMap["correction_draw"]["args"];
+      if (mockCorrectionRemaining <= 0) {
+        return {
+          batch_id: "",
+          path_prefix: "",
+          questions: [],
+          total_score: 0,
+          confirm_token: null,
+        } satisfies CorrectionDraw;
+      }
+      const questionCount = Math.min(Math.max(1, count), mockCorrectionRemaining);
+      mockDrawn = correctionSeeds.slice(0, questionCount).map((question, index) => ({
+        ...question,
+        question_id: `${question.question_id}-${mockCorrectionDraws}`,
+        number: String(index + 1),
+      }));
+      mockCorrectionDraws += 1;
+      return {
+        batch_id: `mock-batch-${mockCorrectionDraws}`,
+        path_prefix: "",
+        questions: mockDrawn,
+        total_score: mockDrawn.reduce((sum, question) => sum + question.score, 0),
+        confirm_token: "mock-correction-token",
+      } satisfies CorrectionDraw;
+    }
+
+    case "correction_submit": {
+      const { confirm_token } = args as CommandMap["correction_submit"]["args"];
+      if (confirm_token !== "mock-correction-token" || mockDrawn.length === 0) {
         throw {
           code: "confirmation_expired",
-          message: "确认已过期，请重新生成预览",
+          message: "确认已过期或已使用，请重新抽题",
           retryable: false,
         };
       }
-      await sleep(320);
-      const cleared = wrongNotes.filter((note) =>
-        mockCleanupIds.includes(note.question_id),
+      await sleep(360);
+      mockCorrectionRemaining = Math.max(
+        0,
+        mockCorrectionRemaining - mockDrawn.length,
       );
-      wrongNotes = wrongNotes.filter(
-        (note) => !mockCleanupIds.includes(note.question_id),
-      );
-      mockCleanupIds = [];
+      const submitted = mockDrawn.length;
+      mockDrawn = [];
       return {
         ok: true,
-        message: `已清理 ${cleared.length} 题`,
-        items: cleared.map((note) => ({
-          question_id: note.question_id,
-          state: "cleared",
-          message: "已清理",
-        })),
-        cleared: cleared.length,
-      } satisfies CleanupRun;
+        message: `已提交 ${submitted} 道题，订单号 mock-batch`,
+        batch_id: "mock-batch",
+        note_message: null,
+      } satisfies CorrectionSubmit;
+    }
+
+    case "correction_status": {
+      await latency();
+      return {
+        status: 2,
+        percent: 100,
+        submit_date: BASE,
+      } satisfies CorrectionStatus;
     }
 
     case "settings_get": {

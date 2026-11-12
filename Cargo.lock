@@ -5639,6 +5639,7 @@ dependencies = [
 name = "up366-protocol"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "httpmock",
  "md-5",
  "quick-xml",

@@ -17,8 +17,5 @@ pub const TABLES: &[&str] = &[
     "answers",
     "audio_assets",
     "submissions",
-    "wrongnote_items",
-    "wrongnote_clean_runs",
-    "wrongnote_clean_items",
     "settings",
 ];

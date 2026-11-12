@@ -25,7 +25,7 @@
 5. 普通作业逐题答案
 6. 单词 PK
 7. 朗读跟读 mp3 上传与提交（作业 + 书籍）
-8. 错题本查看与一键清理
+8. 错题本一键订正（抽题预览 → 标准答案提交 → 批改状态查询）
 9. 性能与简洁 UI
 
 ## 目录
@@ -48,8 +48,19 @@ docs/protocol/     已确认协议与待探测项
 ```bash
 cargo test --workspace
 pnpm --dir frontend build
-cargo tauri build
+
+# 独立可执行文件（内嵌前端，不依赖 localhost）
+cargo build --release -p up366-app --features custom-protocol
+# 产物：target/release/up366-app.exe
+
+# 或者调试时先起 Vite，再 cargo run（不带 custom-protocol 时读 devUrl）
+pnpm --dir frontend dev
+cargo run -p up366-app
 ```
+
+`custom-protocol` 特性决定 Tauri 加载内嵌的 `frontend/dist`；不带它时构建会去连
+`build.devUrl`（默认 `http://localhost:5173`），没有开发服务器就会报
+`ERR_CONNECTION_REFUSED`。
 
 ## 声明
 

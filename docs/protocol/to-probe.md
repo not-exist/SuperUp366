@@ -66,27 +66,36 @@ score is not.
 Whether `allTaskList` array order equals the official UI order. If not, identify
 the real sort key (`beginTime` / `endTime` / `displayOrder` / `taskNo`).
 
-## 6. Wrong-note cleanup granularity
-
-Resolved 2026-11-08: the official client submits one question per call. Cleanup
-sends one `question/submit` per selected question, with `rightQstIds` carrying
-that question's id.
-
-## 7. Essay detection
+## 6. Essay detection
 
 How to reliably identify composition (作文) jobs so they are excluded from the
 answer view. Current code leaves them `JobKind::Unknown` until confirmed.
 
-## 8. Multi-account
+## 7. Multi-account
 
 Whether logging into several accounts on one device triggers a device limit
 (`-31`), and whether sessions evict each other.
 
-## 9. Course pagination
+## 8. Course pagination
 
 Whether `pager.pageSize=999` covers all accounts, or larger lists exist.
+
+## 9. Correction submit payload
+
+Pinned 2026-11-09: the gzip body, `submitType=11`, the `ut` formula,
+`xmlResult.{answerdata,markdatao}` and the per-blank/per-parent mark split are
+all verified on a real submission (see `confirmed.md`). Remaining unknowns:
+
+1. `wrongnoteFlag` is written from the client-info `env` value; our client
+   sends `"PRODUCT"` and the server accepted it, so it is at least not a gate.
+2. Whether the server rejects `qstJson` rows for question types it does not
+   expect. Per-blank types need `elementType=2` rows; choices work with only
+   the parent row.
+3. The `job/submit` ("错题消灭") follow-up is only exercised when the
+   correction is opened with a `studyTaskId`; the standalone overview flow
+   leaves it out.
 
 ## 10. Server time
 
 `/front/current-time` availability, response shape and acceptable skew, needed
-for `startTime`/`endTime` in wrong-note submission.
+for the clock fields in submission payloads.

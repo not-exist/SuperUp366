@@ -1,74 +1,89 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/commands";
-import type { WordPkResult } from "../api/types";
+import type { WordPkPreview, WordPkResult } from "../api/types";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EmptyState } from "../components/EmptyState";
-import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/LoadingState";
-import { ArrowLeftIcon, CheckIcon } from "../components/Icons";
+import { ArrowLeftIcon, CheckIcon, RefreshIcon } from "../components/Icons";
 import { useAccount } from "../hooks/account";
 import { errorMessage } from "../utils";
 
 export function WordPk() {
   const { jobId } = useParams();
   const account = useAccount();
-  const [known, setKnown] = useState<Set<string>>(new Set());
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [result, setResult] = useState<WordPkResult | null>(null);
+  const queryClient = useQueryClient();
 
-  const preview = useQuery({
-    queryKey: ["word-pk", account.account_id, jobId],
-    queryFn: () => api.getWordPk(account.account_id, jobId ?? ""),
-    enabled: Boolean(jobId),
+  const [score, setScore] = useState("8");
+  const [total, setTotal] = useState("10");
+  const [preview, setPreview] = useState<WordPkPreview | null>(null);
+  const [result, setResult] = useState<WordPkResult | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // Drawing calls the bucket endpoint and mints the one-shot token, so it is a
+  // user action rather than an automatic query: re-rendering must not burn a
+  // new round.
+  const draw = useMutation({
+    mutationFn: (request: { score: number; total: number }) =>
+      api.previewWordPk(
+        account.account_id,
+        jobId ?? "",
+        request.score,
+        request.total,
+      ),
+    onSuccess: (data) => {
+      setPreview(data);
+      setResult(null);
+    },
   });
 
   const submit = useMutation({
     mutationFn: () => {
-      // The token comes from the preview that was shown to the user; without
-      // it the backend refuses, so a double click cannot submit twice.
-      const confirmToken = preview.data?.confirm_token;
+      // The token belongs to the preview that was shown; without it the backend
+      // refuses, so a double click cannot submit twice.
+      const confirmToken = preview?.confirm_token;
       if (!confirmToken) {
-        throw { code: "confirmation_expired", message: "预览已过期，请重新打开", retryable: false };
+        throw {
+          code: "confirmation_expired",
+          message: "预览已过期，请重新抽取",
+          retryable: false,
+        };
       }
-      return api.submitWordPk(
-        confirmToken,
-        (preview.data?.words ?? []).map((word) => ({
-          word_id: word.word_id,
-          known: known.has(word.word_id),
-        })),
-      );
+      return api.submitWordPk(confirmToken);
     },
     onSuccess: (data) => {
       setResult(data);
       setConfirmOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["jobs", account.account_id] });
     },
   });
 
-  function toggle(wordId: string) {
-    setKnown((previous) => {
-      const next = new Set(previous);
-      if (next.has(wordId)) {
-        next.delete(wordId);
-      } else {
-        next.add(wordId);
-      }
-      return next;
-    });
-  }
+  const scoreNumber = Number(score);
+  const totalNumber = Number(total);
+  const inputValid =
+    Number.isInteger(scoreNumber) &&
+    Number.isInteger(totalNumber) &&
+    scoreNumber >= 0 &&
+    totalNumber > 0 &&
+    scoreNumber <= totalNumber;
 
-  const words = preview.data?.words ?? [];
+  const correctWords = (preview?.words ?? []).filter((word) => word.correct);
+
+  function startDraw() {
+    if (!inputValid || !jobId) return;
+    draw.mutate({ score: scoreNumber, total: totalNumber });
+  }
 
   return (
     <div className="page">
       <header className="page-header">
         <div>
-          <h1 className="page-title">{preview.data?.title ?? "单词 PK"}</h1>
+          <h1 className="page-title">{preview?.title ?? "单词 PK"}</h1>
           <p className="page-subtitle">
-            {preview.data
-              ? `词桶 ${preview.data.bucket_id} · 共 ${words.length} 个单词`
-              : "预习单词后标记掌握情况。"}
+            {preview
+              ? `词库 ${preview.pool_size} 词 · 抽 ${preview.total} 词，答对 ${preview.score} 个`
+              : "输入分数与 total，从词库随机抽词后确认提交。"}
           </p>
         </div>
         <div className="page-actions">
@@ -81,14 +96,6 @@ export function WordPk() {
 
       {!jobId && (
         <EmptyState title="缺少作业编号" description="请从作业列表重新进入。" />
-      )}
-
-      {preview.isPending && Boolean(jobId) && (
-        <LoadingState label="正在加载单词…" />
-      )}
-
-      {preview.isError && (
-        <ErrorState error={preview.error} onRetry={() => preview.refetch()} />
       )}
 
       {result && (
@@ -104,86 +111,138 @@ export function WordPk() {
         </div>
       )}
 
-      {preview.isSuccess && words.length === 0 && (
-        <EmptyState
-          title="暂无单词"
-          description="该单词 PK 任务还没有同步到词表。"
-        />
+      {draw.isError && (
+        <div className="banner banner--danger" role="alert">
+          {errorMessage(draw.error)}
+        </div>
       )}
 
-      {preview.isSuccess && words.length > 0 && (
-        <>
-          <section className="scoreboard" aria-label="比分">
-            <div className="score-side">
-              <div className="score-number">{preview.data?.my_score ?? "—"}</div>
-              <div className="score-label">我的得分</div>
-            </div>
-            <span className="vs">对</span>
-            <div className="score-side">
-              <div className="score-number">
-                {preview.data?.opponent_score ?? "—"}
-              </div>
-              <div className="score-label">对手得分</div>
-            </div>
-            <div className="toolbar-spacer" />
+      {Boolean(jobId) && (
+        <div className="toolbar">
+          <div className="field">
+            <label className="field-label" htmlFor="wordpk-score">
+              分数（答对词数）
+            </label>
+            <input
+              id="wordpk-score"
+              className="input"
+              type="number"
+              min={0}
+              step={1}
+              value={score}
+              onChange={(event) => setScore(event.target.value)}
+            />
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="wordpk-total">
+              total（本局总词数）
+            </label>
+            <input
+              id="wordpk-total"
+              className="input"
+              type="number"
+              min={1}
+              step={1}
+              value={total}
+              onChange={(event) => setTotal(event.target.value)}
+            />
+          </div>
+
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={startDraw}
+            disabled={!inputValid || draw.isPending}
+          >
+            <RefreshIcon />
+            {draw.isPending ? "正在抽词…" : preview ? "重新抽取" : "随机抽词"}
+          </button>
+
+          {preview && (
             <button
               type="button"
-              className="button button--primary"
+              className="button"
               onClick={() => setConfirmOpen(true)}
               disabled={submit.isPending || result?.ok === true}
             >
               <CheckIcon />
-              {result?.ok ? "已提交" : "提交掌握状态"}
+              {result?.ok ? "已提交" : "提交本局"}
             </button>
+          )}
+        </div>
+      )}
+
+      {!inputValid && (
+        <div className="banner banner--info" role="status">
+          分数需为 0 到 total 之间的整数，total 至少为 1。
+        </div>
+      )}
+
+      {draw.isPending && <LoadingState label="正在抽取单词…" />}
+
+      {preview && (
+        <>
+          <section className="answer-summary" aria-label="本局统计">
+            <div className="stat">
+              <div className="stat-label">本局总词数</div>
+              <div className="stat-value">{preview.total}</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">答对（正确）</div>
+              <div className="stat-value">{preview.score}</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">答错</div>
+              <div className="stat-value">{preview.total - preview.score}</div>
+            </div>
+            <div className="stat">
+              <div className="stat-label">词库可用</div>
+              <div className="stat-value">{preview.pool_size}</div>
+            </div>
           </section>
 
           <div className="word-grid">
-            {words.map((word) => {
-              const checked = known.has(word.word_id);
-              return (
-                <article
-                  key={word.word_id}
-                  className={`word-card${checked ? " word-card--known" : ""}`}
+            {preview.words.map((word) => (
+              <article
+                key={word.word_id}
+                className={`word-card${word.correct ? " word-card--known" : ""}`}
+              >
+                <div className="word-head">
+                  <span className="word-title">{word.word}</span>
+                  <span className="word-phonetic">{word.phonetic}</span>
+                </div>
+                <div className="word-translation">{word.translation}</div>
+                <span
+                  className={`badge ${word.correct ? "badge--finished" : "badge--expired"}`}
                 >
-                  <div className="word-head">
-                    <span className="word-title">{word.word}</span>
-                    <span className="word-phonetic">{word.phonetic}</span>
-                  </div>
-                  <div className="word-translation">{word.translation}</div>
-                  <label className="check" htmlFor={`known-${word.word_id}`}>
-                    <input
-                      id={`known-${word.word_id}`}
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggle(word.word_id)}
-                    />
-                    已掌握
-                  </label>
-                </article>
-              );
-            })}
+                  {word.correct ? "正确" : "错误"}
+                </span>
+              </article>
+            ))}
           </div>
         </>
       )}
 
       <ConfirmDialog
         open={confirmOpen}
-        title="提交单词掌握状态"
+        title="提交单词 PK"
         summary={
           <>
             <p>
-              将提交 {words.length} 个单词，其中 {known.size} 个标记为已掌握。
+              将提交 {preview?.total ?? 0} 个单词：答对{" "}
+              {preview?.score ?? 0} 个，答错{" "}
+              {(preview?.total ?? 0) - (preview?.score ?? 0)} 个。
             </p>
-            {known.size > 0 && (
+            <p className="field-hint">
+              单词 PK 是真实写操作；同一作业重复提交通常返回 -13（重复作答 /
+              次数用尽）。
+            </p>
+            {correctWords.length > 0 && (
               <ul className="summary-list">
-                {words
-                  .filter((word) => known.has(word.word_id))
-                  .slice(0, 10)
-                  .map((word) => (
-                    <li key={word.word_id}>
-                      {word.word} — {word.translation}
-                    </li>
-                  ))}
+                {correctWords.slice(0, 10).map((word) => (
+                  <li key={word.word_id}>{word.word}</li>
+                ))}
               </ul>
             )}
           </>

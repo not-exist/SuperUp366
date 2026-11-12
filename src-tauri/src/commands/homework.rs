@@ -3,8 +3,8 @@
 use serde::Serialize;
 use up366_core::AccountId;
 use up366_protocol::{adapters, dto::AnswerDetail, AnswerDetailParams};
-use up366_store::AccountRecord;
 
+use crate::commands::uid_for;
 use crate::error::{AppError, CommandResult};
 use crate::session::AppState;
 
@@ -60,10 +60,18 @@ pub async fn answer_get(
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<AnswerDocumentView> {
     let (account_id, client) = state.require_client(Some(&account_id))?;
-    let account = load_account(&state, &account_id).await?;
-    let ids = find_job_ids(&state, &account_id, &job_id).await?;
+    let ids = match find_job_ids(&state, &account_id, &job_id).await {
+        Ok(ids) => ids,
+        // A direct link or a cleared cache must not fail the view: refresh the
+        // catalog once, then look the job up again.
+        Err(error) if error.code == "not_found" => {
+            crate::commands::catalog::refresh_catalog(&state, &account_id, &client).await?;
+            find_job_ids(&state, &account_id, &job_id).await?
+        }
+        Err(error) => return Err(error),
+    };
 
-    let uid = account.uid.clone().ok_or_else(AppError::auth_required)?;
+    let uid = uid_for(&state, &account_id, &client).await?;
     let params = AnswerDetailParams::new(
         ids.course_id.clone(),
         uid,
@@ -78,21 +86,10 @@ pub async fn answer_get(
     Ok(build_view(job_id, ids.content_id, &detail))
 }
 
-/// Read the stored account, required for `uid`.
-async fn load_account(state: &AppState, account_id: &AccountId) -> CommandResult<AccountRecord> {
-    state
-        .db
-        .accounts()
-        .get(account_id)
-        .await
-        .map_err(storage_error)?
-        .ok_or_else(AppError::auth_required)
-}
-
 /// Locate a cached job and return the ids the endpoint requires.
 ///
-/// A miss means the job list was never fetched (or the cache was cleared), so
-/// the caller must refresh rather than guess ids.
+/// A miss means the job list was never fetched (or the cache was cleared); the
+/// command refreshes the catalog and retries before surfacing `not_found`.
 async fn find_job_ids(
     state: &AppState,
     account_id: &AccountId,

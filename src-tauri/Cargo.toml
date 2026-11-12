@@ -11,6 +11,12 @@ repository.workspace = true
 name = "up366_app"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Without this feature a build loads `build.devUrl` (the Vite server) instead of
+# the embedded `frontendDist`. Enable it for any standalone binary:
+#   cargo build --release --features custom-protocol
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

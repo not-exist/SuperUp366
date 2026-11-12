@@ -57,7 +57,6 @@ URL once with `?ticket=<st>` (or `&ticket=` when a query already exists).
 | Task score | `study-api /client/task/score/submit/v2` |
 | OSS STS | `setup-api /front/aliyunoss/token/v2?organId=` |
 | Server time | `setup-api /front/current-time` |
-| Wrong-note reads/writes | `wrongnote-api /client/wrongnote/...` (10 endpoints) |
 
 ## Status fields
 
@@ -88,11 +87,15 @@ fields marks everything pending or expired. The authoritative rows come from
 - `pages`: type 2 nodes with `name`, `parentId` (a chapter id) and `taskId`.
 - `tasks`: type 3 nodes with `id`, `parentId` (a chapter id), `taskType`.
 
-`page.taskId` is the `task.id` used by `/client/book/finished-task/list`;
-completion is the intersection of the two id sets. The shelf response carries
-no task counts and no display name for `subjectId` (it is a numeric id), so
-progress can only be computed after fetching the tree. Nested chapters are
-navigation only: a page belongs to its nearest top-level ancestor.
+The assignment list is `tasks`; a page only links to one through `taskId`, and
+many chapters (for example 测验) have a task and no page at all. Iterating
+pages misses those tasks, so the detail view builds one row per task and uses
+the linked page's `name` when present. `task.id` is the id used by
+`/client/book/finished-task/list`; completion is the intersection of the two id
+sets. The shelf response carries no task counts and no display name for
+`subjectId` (it is a numeric id), so progress can only be computed after
+fetching the tree. Nested chapters are navigation only: a task belongs to its
+nearest top-level ancestor.
 
 ## Answer detail
 
@@ -110,38 +113,80 @@ the job's `contentId`; passing `jobId` yields empty `paperInfo`. v2 requires
   never a direct field of the score endpoint.
 - OSS object name: `storage{userType}/study/a/{yyyy/mm/dd}/{uid}/{file}`.
 
-## Wrong-answer book
+## Error-notebook: correction
 
-- `subject/list` returns an array; `subjectId` and `stageId` are **numbers**
-  (for example `303` / `3`), not strings.
-- `knowledge/list/v3` returns `data.{list,pager}` and **requires** `stageId`,
-  `subjectId`, `bookId`, `startTime`, `endTime`, `orderType`, `orderField`
-  and the pager; without the stage or the time range it answers `-1
-  param_missing`. Its columns are spelt `qTypeId` / `qTypeName`.
-- `student/question/show` requires `stageId`, `subjectId`, `bookId` (`"0"` means
-  all books; an empty string is rejected), `qtypeId`, `knowledgeId`, the time
-  range and the pager. It returns `paperData` / `answerData` /
-  `userAnswerData` plus a `list` of rows keyed by `questionId`; the stem and
-  answers are only in the XML, not in the row.
-- `questions/kill` is a **read** endpoint returning `pathPrefix` / `paperData` /
-  `answerData` for the kill page.
-- `question/submit` is the only destructive call:
+The H5 wrong-note page (`cuoti-stu.up366.cn`) reads through
+`error-notebook-api.up366.cn/client/personalmistake/...`: `mistakeTypes`,
+`overview`, `exercises`, `page`, `answerHistory`, `knowledgePoints`,
+`statistics`. These are `application/json` POSTs carrying `studentId`,
+`organId` and `stageId` as numbers. **[R]** H5 bundle `src/api/error-notebook-api/index.ts`.
 
+### Draw
+
+`POST /client/personalmistake/correction/draw` — **form-urlencoded**, not JSON.
+
+| Field | Notes |
+| --- | --- |
+| `studentId` | number |
+| `questionIdList` | JSON array text; omitted (or `[]`) for "by count" |
+| `questionCount` | number of questions to draw |
+| `groupKey` | optional overview group (by-question-type correction) |
+
+A successful call returns `data.{paperData, answerData, pathPrefix, batchId}`.
+`paperData` is the usual `<elements>` paper, `answerData` holds the correct
+answers, `pathPrefix` is the media prefix. Every call creates a **new**
+`batchId`; an empty `data` means there is nothing left to correct. **[S]**
+live: `studentId=39370562, questionCount=5, groupKey=…` returned all four
+fields with `pathPrefix=https://qlib-cdn-up366-alyun.up366.cn`.
+
+### Status
+
+`POST /client/personalmistake/correction/status` — **form-urlencoded**.
+Fields `batchId` and `uid` (uid sent as text). Response:
+`{ status, paperInfo, userAnswer, percent, submitDate }` where `status` is
+`0` not submitted, `1` marking, `2` report ready. Poll until it stops being
+`1`. **[S]** live: fresh batch answers `status: 0`.
+
+### Submit
+
+The answer page hands the payload to the Electron main process, which posts to
+`https://study-api.up366.cn/client/task/score/gzip/submit` with
+`Content-Type: application/json;charset=UTF-8` and `Content-Encoding: gzip`
+(the body itself is gzipped):
+
+```json
+{ "tasksJson": "<JSON string of [tasksJson]>", "ut": "...", "submitType": 11 }
 ```
-uid, result, startTime, endTime, seconds, rightQstIds
-result = json({ "answerdata": "<student xml>", "mark_datao": "<elements>...</elements>" })
-seconds = ceil((endTime - startTime) / 1000)
-rightQstIds = comma-separated, or ""
+
+`tasksJson` holds `uid, batchId, courseId, studyTaskId, bookId, bookType,
+chapterId, paperId, taskId, seconds, percent, score, testId, taskNo, qstJson,
+deviceType, clientId, studyDate, wrongnoteFlag` and
+`extendParams.{batchId, paperDataXml, answerDataXml, xmlResult}`. `testId`
+falls back to `759E3BB039A9674D6697A88433DC5D6B`. `ut` is the task-score
+formula with the literal `submitTaskToken`:
+
+```text
+r  = md5(ts)
+ut = r[..10] + md5(md5(tasksJson) + "submitTaskToken-pc-987654" + r) + r[10..]
 ```
 
-- One question per call is accepted; the official client's cleanup submits the
-  page in a single call, but per-question submissions work the same way.
-- `answerdata` is an `<elements>` document with one `<element id="...">` per
-  answered question, copied from the standard `answerData` shape.
-- `mark_datao` is an `<elements>` document: one `<element id="...">` holding
-  `<mark_data><score>..</score><result>1</result></mark_data>`.
+After the submit the page calls `POST study-api /client/job/submit` with
+`jobJson = json({uid, courseId, studyTaskId})` ("错题消灭"). **[R]**
+main bundle `submitTask`/`buildUT` and the correction route chunk.
 
-- Auth: cookies or a one-time `?ticket=`; `u3t` alone returns `-21`.
+**[S]** live 2026-11-09: one drawn question submitted with this payload was
+accepted; `correction/status` went `1 → 2` (once straight to `2`), `percent`
+reached `100`, and the overview moved `remaining -1 / corrected +1 / today +1`
+on both runs. The submit response itself is `data = null`.
+
+Answer-document shapes that the builder must handle:
+
+- fill-blank: `<answers><answer id="1" score="1">assumptions</answer></answers>`
+  — one mark per blank, type `4` (also `6`, `8`, `10`, `11`).
+- choice / multi-choice: `<answers>ABC</answers>` — the parent row carries the
+  answer; there are no sub-question marks.
+- mark data: `<mark_data id="1"><score>..</score><result>1</result>
+  <teacher_marked>0</teacher_marked><user_answer>..</user_answer></mark_data>`.
 
 ## Business codes
 

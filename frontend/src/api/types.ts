@@ -120,62 +120,53 @@ export interface AnswerDocument {
   questions: AnswerQuestion[];
 }
 
-export interface WrongNote {
+/** One question type group from the error-notebook overview. */
+export interface CorrectionGroup {
+  group_key: string;
+  remaining_count: number;
+  qtype_name: string;
+  knowledge_name: string;
+}
+
+export interface CorrectionOverview {
+  remaining_count: number;
+  corrected_count: number;
+  today_corrected_count: number;
+  groups: CorrectionGroup[];
+}
+
+export interface CorrectionQuestion {
   question_id: string;
-  job_id: string;
-  course_id: string;
-  class_name: string;
-  title: string;
+  number: string;
   question_type: string;
+  type_name: string;
+  score: number;
   stem: string;
-  correct_answer: string;
-  student_answer: string;
-  added_at: string;
+  /** Correct answer, with choice options expanded for display. */
+  answer: string;
 }
 
-export interface CleanupPreviewItem {
-  question_id: string;
-  title: string;
+export interface CorrectionDraw {
+  batch_id: string;
+  path_prefix: string;
+  questions: CorrectionQuestion[];
+  total_score: number;
+  /** `null` when there is nothing left to correct. */
+  confirm_token: string | null;
 }
 
-export interface CleanupPreview {
-  items: CleanupPreviewItem[];
-  total: number;
-  /** One-shot token for `wrongnotes_cleanup`. */
-  confirm_token: string;
-}
-
-/** One question's outcome inside a cleanup run. */
-export interface CleanupItemResult {
-  question_id: string;
-  /** `cleared`, `failed`, or `skipped`. */
-  state: string;
-  message: string;
-}
-
-export interface CleanupRun {
+export interface CorrectionSubmit {
   ok: boolean;
   message: string;
-  items: CleanupItemResult[];
-  /** How many questions were actually cleared. */
-  cleared: number;
+  batch_id: string;
+  note_message: string | null;
 }
 
-/** One subject row, used to fill the picker. */
-export interface WrongSubject {
-  subject_id: string;
-  subject_name: string;
-  wrong_count: number;
-  killed_count: number;
-}
-
-/** One knowledge point. */
-export interface WrongKnowledge {
-  knowledge_id: string;
-  knowledge_name: string;
-  qtype_id: string;
-  qtype_name: string;
-  wrong_count: number;
+export interface CorrectionStatus {
+  /** 0 not submitted, 1 marking, 2 report ready. */
+  status: number;
+  percent: number;
+  submit_date: number;
 }
 
 export interface WordPkResult {
@@ -183,29 +174,31 @@ export interface WordPkResult {
   message: string;
 }
 
-/** One word as the word-PK picker renders it. */
+/** One drawn word as the word-PK preview renders it. */
 export interface WordPkWord {
   word_id: string;
   word: string;
   phonetic: string;
   translation: string;
   audio_url: string | null;
+  /** Whether this word is submitted as a correct answer. */
+  correct: boolean;
 }
 
 export interface WordPkPreview {
   job_id: string;
   title: string;
   bucket_id: string;
-  my_score: number | null;
-  opponent_score: number | null;
+  /** Usable words the round was drawn from. */
+  pool_size: number;
+  /** Requested score, which is also the number of correct words. */
+  score: number;
+  /** Number of drawn words. */
+  total: number;
+  /** Drawn words in wire order: correct first, then wrong. */
   words: WordPkWord[];
   /** One-shot token for `wordpk_submit`. */
   confirm_token: string;
-}
-
-export interface WordPkAnswer {
-  word_id: string;
-  known: boolean;
 }
 
 export type UploadStatus = "idle" | "validating" | "ready" | "uploading" | "uploaded" | "failed";
@@ -295,11 +288,11 @@ export interface CommandMap {
   };
 
   wordpk_preview: {
-    args: { account_id: string; job_id: string };
+    args: { account_id: string; job_id: string; score: number; total: number };
     result: WordPkPreview;
   };
   wordpk_submit: {
-    args: { confirm_token: string; answers: WordPkAnswer[] };
+    args: { confirm_token: string };
     result: WordPkResult;
   };
 
@@ -320,48 +313,22 @@ export interface CommandMap {
     result: ReadAloudPreview;
   };
 
-  wrongnotes_subjects: { args: { account_id: string }; result: WrongSubject[] };
-  wrongnotes_knowledge: {
-    args: {
-      account_id: string;
-      filter: {
-        subject_id?: string;
-        book_id?: string;
-        knowledge_id?: string;
-        qtype_id?: string;
-        stage_id?: string;
-      };
-    };
-    result: WrongKnowledge[];
+  correction_overview: {
+    args: { account_id: string };
+    result: CorrectionOverview;
   };
-  wrongnotes_pending: {
-    args: {
-      account_id: string;
-      filter: {
-        subject_id?: string;
-        book_id?: string;
-        knowledge_id?: string;
-        qtype_id?: string;
-        stage_id?: string;
-      };
-    };
-    result: WrongNote[];
+  correction_draw: {
+    args: { account_id: string; count: number; group_key?: string };
+    result: CorrectionDraw;
   };
-  wrongnotes_preview: {
-    args: {
-      account_id: string;
-      question_ids: string[];
-      filter: {
-        subject_id?: string;
-        book_id?: string;
-        knowledge_id?: string;
-        qtype_id?: string;
-        stage_id?: string;
-      };
-    };
-    result: CleanupPreview;
+  correction_submit: {
+    args: { confirm_token: string };
+    result: CorrectionSubmit;
   };
-  wrongnotes_cleanup: { args: { confirm_token: string }; result: CleanupRun };
+  correction_status: {
+    args: { account_id: string; batch_id: string };
+    result: CorrectionStatus;
+  };
 
   settings_get: { args: Record<string, never>; result: Settings };
   settings_update: { args: { settings: Settings }; result: Settings };

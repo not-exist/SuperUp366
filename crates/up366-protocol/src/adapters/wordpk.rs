@@ -1,15 +1,18 @@
 //! Word-PK write adapter.
 //!
-//! The submission shape comes from the reference client: the task-mode submit
-//! sends a compact `submitJson` with the round's score and one
-//! `answerStatus`-annotated word per attempted word.
+//! The submission shape is the task-mode branch of the reference client: one
+//! compact `submitJson` carrying the round's counts plus a full word record per
+//! attempted word, and the seven form fields around it.
+//!
+//! Scoring is `score = rightWordList.length` (see `recon/feature-word-pk.md`),
+//! so `score` is the number of correct words and `wrongLength` is the rest.
 //!
 //! Method caveat: `recon/feature-word-pk.md` records **GET**, while the retired
 //! client sent POST and only fell back to GET on 404/405. The endpoint table
 //! therefore says POST and the mismatch is tracked in
 //! `docs/protocol/to-probe.md`. Nothing here "tries" a method at runtime: a
 //! burned attempt cannot be un-burned, so the shape is fixed at build time and
-//! a probe decides it before the feature is enabled.
+//! the 404/405 fallback stays out until a probe pins the method.
 
 use serde_json::{json, Value};
 
@@ -26,15 +29,16 @@ pub struct WordPkSubmission {
     pub course_id: String,
     /// `studyTaskId`, which equals the job id.
     pub study_task_id: String,
-    /// Words answered correctly, in the order they were shown.
+    /// Words answered correctly, in the order they were drawn.
     pub correct: Vec<Word>,
     /// Words answered incorrectly.
     pub wrong: Vec<Word>,
-    /// Requested round score; the server derives it from the word list, so the
-    /// value is only sent, never trusted.
+    /// Requested round score; equals the number of correct words.
     pub score: i64,
     /// Round duration as sent by the reference client; empty when unknown.
     pub duration: String,
+    /// `roleName`; the reference client sends `Red` or `Blue`.
+    pub role_name: String,
 }
 
 impl WordPkSubmission {
@@ -48,20 +52,41 @@ impl WordPkSubmission {
         self.correct.len()
     }
 
-    /// Word records in the wire order: correct first, then wrong.
-    fn word_infos(&self) -> Vec<Value> {
+    /// Full word records in wire order: correct first, then wrong.
+    ///
+    /// Every field the reference client sends is included, because the server
+    /// echoes these records back as the round's answer detail. `answerTime` is
+    /// a millisecond timestamp that must increase per record.
+    fn word_infos(&self, now_ms: u128) -> Vec<Value> {
         let mut infos = Vec::with_capacity(self.total());
         for (status, words) in [(1, &self.correct), (0, &self.wrong)] {
-            for (index, word) in words.iter().enumerate() {
+            for word in words {
+                let index = infos.len();
                 let entry_id = word
                     .entry_id
                     .clone()
                     .or_else(|| word.entry.clone())
                     .unwrap_or_default();
+                let answer = if status == 1 {
+                    word.entry.clone().unwrap_or_default()
+                } else {
+                    String::new()
+                };
                 infos.push(json!({
                     "entryId": entry_id,
+                    "en": word.entry.clone().unwrap_or_default(),
+                    "cn": word.cn(),
+                    "phonetic": word
+                        .us_phonetic
+                        .clone()
+                        .or_else(|| word.en_phonetic.clone())
+                        .unwrap_or_default(),
+                    "audio": word.audio_url(),
+                    "sourceType": word.source_type.unwrap_or(1),
+                    "localId": index,
+                    "answer": answer,
                     "answerStatus": status,
-                    "localId": infos.len() + index,
+                    "answerTime": now_ms as u64 + index as u64,
                 }));
             }
         }
@@ -69,12 +94,12 @@ impl WordPkSubmission {
     }
 
     /// The exact `submitJson` payload text.
-    fn submit_json(&self) -> String {
+    fn submit_json(&self, now_ms: u128) -> String {
         let payload = json!({
             "totalNum": self.total(),
             "rightNum": self.right(),
             "score": self.score,
-            "wordInfos": self.word_infos(),
+            "wordInfos": self.word_infos(now_ms),
             "duration": self.duration,
         });
         // Compact separators match the reference client byte for byte.
@@ -82,13 +107,13 @@ impl WordPkSubmission {
     }
 
     /// The full form body.
-    fn form(&self) -> Vec<(&'static str, Value)> {
+    fn form(&self, now_ms: u128) -> Vec<(&'static str, Value)> {
         vec![
             ("courseId", json!(&self.course_id)),
             ("studyTaskId", json!(&self.study_task_id)),
-            ("roleName", json!("Red")),
+            ("roleName", json!(&self.role_name)),
             ("roleType", json!("0")),
-            ("submitJson", json!(self.submit_json())),
+            ("submitJson", json!(self.submit_json(now_ms))),
             ("wrongLength", json!(self.wrong.len())),
             ("score", json!(self.score)),
         ]
@@ -116,7 +141,9 @@ pub async fn submit_word_pk(client: &Client, submission: &WordPkSubmission) -> R
         ));
     }
 
-    let data = client.call(endpoint, &submission.form()).await?;
+    let data = client
+        .call(endpoint, &submission.form(client.now_ms()))
+        .await?;
     Ok(data.unwrap_or(Value::Null))
 }
 
@@ -142,12 +169,13 @@ mod tests {
             wrong: vec![word("e2", "banana")],
             score: 1,
             duration: String::new(),
+            role_name: "Red".to_owned(),
         }
     }
 
     #[test]
     fn submit_json_counts_and_orders_words() {
-        let json: Value = serde_json::from_str(&round().submit_json()).unwrap();
+        let json: Value = serde_json::from_str(&round().submit_json(1_700_000_000_000)).unwrap();
         assert_eq!(json["totalNum"], 2);
         assert_eq!(json["rightNum"], 1);
         assert_eq!(json["score"], 1);
@@ -156,13 +184,19 @@ mod tests {
         // Correct first.
         assert_eq!(infos[0]["entryId"], "e1");
         assert_eq!(infos[0]["answerStatus"], 1);
+        assert_eq!(infos[0]["en"], "apple");
+        assert_eq!(infos[0]["localId"], 0);
+        assert_eq!(infos[0]["answer"], "apple");
         assert_eq!(infos[1]["entryId"], "e2");
         assert_eq!(infos[1]["answerStatus"], 0);
+        assert_eq!(infos[1]["answer"], "");
+        // `answerTime` increases per record.
+        assert!(infos[0]["answerTime"].as_u64() < infos[1]["answerTime"].as_u64());
     }
 
     #[test]
     fn submit_json_is_compact_like_the_reference_client() {
-        let json = round().submit_json();
+        let json = round().submit_json(1_700_000_000_000);
         assert!(!json.contains(", ") && !json.contains(": "));
     }
 

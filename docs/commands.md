@@ -69,9 +69,11 @@ yields two rows.
 
 `books_list` is shelf metadata only: a book's total task count needs the whole
 tree (megabytes for a large reader book), so it is fetched on the detail page.
-`book_detail` groups each page under its top-level chapter and derives
-`progress` / `total` from `finished-task/list`. Book rows are display-only:
-a page's `taskId` is not a job id, so the answer route cannot open it.
+`book_detail` builds rows from the tree's `tasks` array (type 3), using a page
+(type 2) only for the display name and falling back to the owning chapter's
+title when a task has no page. `progress` / `total` come from
+`finished-task/list`. Book rows are display-only: a book task id is not a job
+id, so the answer route cannot open it.
 
 ## Answers
 
@@ -87,12 +89,21 @@ collapsed raw view.
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `wordpk_preview` | `account_id, job_id` | `WordPkPreview` (includes `confirm_token`) |
-| `wordpk_submit` | `confirm_token, answers` | `WordPkResult` |
+| `wordpk_preview` | `account_id, job_id, score, total` | `WordPkPreview` (includes `confirm_token`) |
+| `wordpk_submit` | `confirm_token` | `WordPkResult` |
 
-The submit call re-reads the bucket from the server, so the submitted words are
-the words the server still returns, and the token is consumed before the
-network call so a double click cannot submit twice.
+`wordpk_preview` draws the round: it reads the task's `pkBucketId` bucket, keeps
+the unique words that carry an `entryId` (or the older `pkid`), and picks
+`total` of them at random. The first `score` drawn words are the correct ones and
+the rest are wrong, because Word-PK scoring is `score = rightWordList.length`.
+The request is rejected when `total > 可用单词数`, `score > total` or
+`total == 0`.
+
+The drawn round is stored in the one-shot token, so `wordpk_submit` submits
+exactly the words the user saw: it never re-reads the bucket and cannot be
+pointed at a different round. The token is consumed before the network call, so
+a double click cannot submit twice. `duration` is the seconds between the draw
+and the submit, taken from server time.
 
 ## Read-aloud
 
@@ -112,22 +123,24 @@ just in copy:
   layer refuses to send, because the submit branch, `mark_datao` numbering and
   `qstJson` shape are not confirmed against a real homework task.
 
-## Wrong-notes
+## Correction (error-notebook)
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `wrongnotes_subjects` | `account_id` | `WrongSubject[]` |
-| `wrongnotes_knowledge` | `account_id, filter{subject_id, book_id, stage_id?}` | `WrongKnowledge[]` |
-| `wrongnotes_pending` | `account_id, filter{subject_id, book_id, knowledge_id, qtype_id, stage_id?}` | `WrongNote[]` |
-| `wrongnotes_preview` | `account_id, question_ids, filter{subject_id, book_id, knowledge_id, qtype_id}` | `CleanupPreview` |
-| `wrongnotes_cleanup` | `confirm_token` | `CleanupRun` |
+| `correction_overview` | `account_id` | `CorrectionOverview` (remaining / corrected / today + groups) |
+| `correction_draw` | `account_id, count, group_key?` | `CorrectionDraw` (questions + one-shot `confirm_token`) |
+| `correction_submit` | `confirm_token` | `CorrectionSubmit` |
+| `correction_status` | `account_id, batch_id` | `CorrectionStatus` |
 
-`wrongnotes_preview` fetches the same page the list came from and copies each
-selected question's standard answer into the one-shot token; nothing is sent
-yet. `wrongnotes_cleanup` then submits one `question/submit` per question, in
-series, with the numeric `uid` from the user profile and the server's clock.
-Each question is reported separately, and three consecutive failures stop the
-batch so a partial run can be resumed rather than replayed.
+`correction_draw` calls `personalmistake/correction/draw` and stores the paper
+in the token; it does not write. The preview lists every drawn question with
+the server's standard answer, so the user confirms before anything is sent.
+`correction_submit` builds one `tasksJson` object with `batchId`, the paper and
+answer XML, a `mark_datao` document marking every question correct, and the
+`qstJson` rows, then gzips it to `study-api/client/task/score/gzip/submit` with
+`submitType=11`. The token is single-use, so a double click cannot submit the
+same batch twice. `correction_status` reads the marking state afterwards
+(`0` not submitted, `1` marking, `2` ready).
 
 ## Settings
 

@@ -25,6 +25,7 @@ up366-sync = { path = "crates/up366-sync" }
 
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
+flate2 = "1"
 httpmock = "0.7"
 keyring = "3"
 md-5 = "0.10"

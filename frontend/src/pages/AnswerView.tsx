@@ -55,7 +55,7 @@ export function AnswerView() {
           <h1 className="page-title">{answer.data?.title ?? "作业答案"}</h1>
           <p className="page-subtitle">
             {answer.data
-              ? `得分 ${answer.data.score ?? "—"} / ${answer.data.max_score} · 共 ${questions.length} 题`
+              ? `得分 ${answer.data.score ?? "—"}${answer.data.max_score != null ? ` / ${answer.data.max_score}` : ""}${questions.length > 0 ? ` · 共 ${questions.length} 题` : ""}`
               : "逐题查看作答与标准答案。"}
           </p>
         </div>
@@ -79,12 +79,14 @@ export function AnswerView() {
         <ErrorState error={answer.error} onRetry={() => answer.refetch()} />
       )}
 
-      {answer.isSuccess && questions.length === 0 && (
-        <EmptyState
-          title="暂无答案数据"
-          description="该作业可能尚未批改，或答案接口还没有返回题目。"
-        />
-      )}
+      {answer.isSuccess &&
+        questions.length === 0 &&
+        !answer.data.paper_xml && (
+          <EmptyState
+            title="暂无答案数据"
+            description="该作业可能尚未批改，或答案接口还没有返回题目。"
+          />
+        )}
 
       {answer.isSuccess && questions.length > 0 && (
         <>
@@ -143,15 +145,20 @@ export function AnswerView() {
             ))}
           </div>
 
-          <details className="raw-details">
-            <summary>原始试卷 XML</summary>
-            <pre>{answer.data.paper_xml}</pre>
-          </details>
-
-          <p className="field-hint" style={{ marginTop: 12 }}>
-            任务 ID：{answer.data.task_id}（答案接口使用 contentId，不是作业 ID）
-          </p>
         </>
+      )}
+
+      {answer.isSuccess && answer.data.paper_xml && (
+        <details className="raw-details" open={questions.length === 0}>
+          <summary>原始试卷 XML</summary>
+          <pre>{answer.data.paper_xml}</pre>
+        </details>
+      )}
+
+      {answer.isSuccess && (
+        <p className="field-hint" style={{ marginTop: 12 }}>
+          任务 ID：{answer.data.task_id}（答案接口使用 contentId，不是作业 ID）
+        </p>
       )}
     </div>
   );

@@ -5,7 +5,7 @@
 // silently drops anything unexpected.
 
 import { invokeCommand } from "./invoke";
-import type { Settings, WordPkAnswer } from "./types";
+import type { Settings } from "./types";
 
 export const api = {
   listAccounts: () => invokeCommand("accounts_list", {}),
@@ -29,10 +29,15 @@ export const api = {
   getAnswer: (accountId: string, jobId: string) =>
     invokeCommand("answer_get", { account_id: accountId, job_id: jobId }),
 
-  getWordPk: (accountId: string, jobId: string) =>
-    invokeCommand("wordpk_preview", { account_id: accountId, job_id: jobId }),
-  submitWordPk: (confirmToken: string, answers: WordPkAnswer[]) =>
-    invokeCommand("wordpk_submit", { confirm_token: confirmToken, answers }),
+  previewWordPk: (accountId: string, jobId: string, score: number, total: number) =>
+    invokeCommand("wordpk_preview", {
+      account_id: accountId,
+      job_id: jobId,
+      score,
+      total,
+    }),
+  submitWordPk: (confirmToken: string) =>
+    invokeCommand("wordpk_submit", { confirm_token: confirmToken }),
 
   getReadAloud: (accountId: string, jobId: string) =>
     invokeCommand("readaloud_get", { account_id: accountId, job_id: jobId }),
@@ -55,46 +60,21 @@ export const api = {
       dry_run: dryRun,
     }),
 
-  listWrongSubjects: (accountId: string) =>
-    invokeCommand("wrongnotes_subjects", { account_id: accountId }),
-  listWrongKnowledge: (accountId: string, subjectId: string, bookId?: string) =>
-    invokeCommand("wrongnotes_knowledge", {
+  getCorrectionOverview: (accountId: string) =>
+    invokeCommand("correction_overview", { account_id: accountId }),
+  drawCorrection: (accountId: string, count: number, groupKey?: string) =>
+    invokeCommand("correction_draw", {
       account_id: accountId,
-      filter: { subject_id: subjectId, book_id: bookId },
+      count,
+      ...(groupKey ? { group_key: groupKey } : {}),
     }),
-  listWrongPending: (
-    accountId: string,
-    subjectId: string,
-    bookId: string,
-    knowledgeId: string,
-    qtypeId: string,
-  ) =>
-    invokeCommand("wrongnotes_pending", {
+  submitCorrection: (confirmToken: string) =>
+    invokeCommand("correction_submit", { confirm_token: confirmToken }),
+  getCorrectionStatus: (accountId: string, batchId: string) =>
+    invokeCommand("correction_status", {
       account_id: accountId,
-      filter: {
-        subject_id: subjectId,
-        book_id: bookId,
-        knowledge_id: knowledgeId,
-        qtype_id: qtypeId,
-      },
+      batch_id: batchId,
     }),
-  previewWrongNoteCleanup: (
-    accountId: string,
-    questionIds: string[],
-    filter: {
-      subject_id: string;
-      book_id: string;
-      knowledge_id: string;
-      qtype_id: string;
-    },
-  ) =>
-    invokeCommand("wrongnotes_preview", {
-      account_id: accountId,
-      question_ids: questionIds,
-      filter,
-    }),
-  cleanupWrongNotes: (confirmToken: string) =>
-    invokeCommand("wrongnotes_cleanup", { confirm_token: confirmToken }),
 
   getSettings: () => invokeCommand("settings_get", {}),
   updateSettings: (settings: Settings) =>

@@ -13,12 +13,15 @@
 //! writes never retry. Both limits are deliberate: replaying a write is a
 //! correctness bug, not an optimization.
 
+use std::io::Write as _;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use reqwest::cookie::CookieStore;
 use reqwest::header::{
-    HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_TYPE, USER_AGENT,
+    HeaderMap, HeaderName, HeaderValue, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE, USER_AGENT,
 };
 use reqwest::Client as HttpClient;
 use serde_json::Value;
@@ -398,13 +401,31 @@ impl Client {
     ) -> Result<Value> {
         let mut request = match endpoint.body {
             BodyKind::Query => self.http.get(url),
-            BodyKind::Form | BodyKind::None => self.http.post(url),
+            BodyKind::Form | BodyKind::Json | BodyKind::JsonGzip | BodyKind::None => {
+                self.http.post(url)
+            }
         };
         request = request.headers(self.headers(anonymous)?);
-        if endpoint.body == BodyKind::Form {
-            request = request
-                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
-                .body(encode_form_body(fields));
+        match endpoint.body {
+            BodyKind::Form => {
+                request = request
+                    .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(encode_form_body(fields));
+            }
+            BodyKind::Json => {
+                request = request
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(json_object(fields).to_string());
+            }
+            BodyKind::JsonGzip => {
+                // The official correction submit sends a gzip-compressed JSON
+                // body; the plain JSON variant is rejected by this endpoint.
+                request = request
+                    .header(CONTENT_TYPE, "application/json;charset=UTF-8")
+                    .header(CONTENT_ENCODING, "gzip")
+                    .body(gzip_json(fields)?);
+            }
+            BodyKind::Query | BodyKind::None => {}
         }
 
         let response = request.send().await.map_err(ProtocolError::from)?;
@@ -537,6 +558,27 @@ fn encode_form_body(fields: &[(&str, Value)]) -> String {
         }
     }
     encoder.finish()
+}
+
+/// Build the JSON object a [`BodyKind::Json`] / [`BodyKind::JsonGzip`] request
+/// carries from the same field list the form path uses.
+fn json_object(fields: &[(&str, Value)]) -> Value {
+    let object: serde_json::Map<String, Value> = fields
+        .iter()
+        .map(|(key, value)| ((*key).to_owned(), value.clone()))
+        .collect();
+    Value::Object(object)
+}
+
+/// Gzip-compress the JSON body.
+fn gzip_json(fields: &[(&str, Value)]) -> Result<Vec<u8>> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(json_object(fields).to_string().as_bytes())
+        .map_err(|error| ProtocolError::Transport(format!("gzip body: {error}")))?;
+    encoder
+        .finish()
+        .map_err(|error| ProtocolError::Transport(format!("gzip body: {error}")))
 }
 
 fn append_query(url: &str, fields: &[(&str, Value)]) -> Result<String> {
@@ -795,6 +837,48 @@ mod tests {
 
     fn ok(data: Value) -> Value {
         json!({ "result": { "code": 0, "msg": "ok" }, "data": data })
+    }
+
+    #[test]
+    fn a_json_gzip_body_round_trips_to_the_same_object() {
+        let fields = [
+            ("tasksJson", json!("[{\"a\":1}]")),
+            ("ut", json!("abc")),
+            ("submitType", json!(11)),
+        ];
+        let compressed = gzip_json(&fields).unwrap();
+        let mut decoder = flate2::read::GzDecoder::new(compressed.as_slice());
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut decoder, &mut text).unwrap();
+        let parsed: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed["tasksJson"], "[{\"a\":1}]");
+        assert_eq!(parsed["submitType"], 11);
+    }
+
+    #[tokio::test]
+    async fn a_json_gzip_endpoint_sends_the_encoding_header() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/gzip")
+                .header("content-encoding", "gzip")
+                .header("content-type", "application/json;charset=UTF-8");
+            then.status(200).json_body(ok(json!({ "got": 1 })));
+        });
+        let endpoint = Endpoint {
+            name: "gzip_test",
+            base_url: "https://example.test",
+            path: "/gzip",
+            write: true,
+            body: BodyKind::JsonGzip,
+        };
+        let data = client(&server)
+            .call(&endpoint, &[("tasksJson", json!("[]"))])
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(data["got"], 1);
+        mock.assert_hits(1);
     }
 
     #[test]
