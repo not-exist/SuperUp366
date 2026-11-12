@@ -147,7 +147,15 @@ pub async fn readaloud_get(
 ) -> CommandResult<ReadAloudTaskView> {
     let (account_id, client) = state.require_client(Some(&account_id))?;
     let loaded = load_task(&state, &account_id, &client, &job_id).await?;
-    let submitted = is_submitted(&state, &account_id, &job_id, &loaded.job).await?;
+    let submitted = is_submitted(
+        &state,
+        &account_id,
+        &client,
+        &job_id,
+        &loaded.course_id,
+        &loaded.job,
+    )
+    .await?;
     let expired = loaded
         .job
         .end_time
@@ -224,8 +232,16 @@ pub async fn readaloud_upload(
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| AppError::new("protocol_drift", "账号缺少 organId"))?;
 
-    let object_name =
-        up366_media::object_name(user_type, &uid, &recording.file_name, chrono::Local::now());
+    // A uuid keeps two uploads with the same local file name from overwriting
+    // each other under the same uid and date.
+    let extension = recording
+        .file_name
+        .rsplit_once('.')
+        .map(|(_, extension)| extension)
+        .filter(|extension| !extension.is_empty())
+        .unwrap_or("mp3");
+    let object_file = format!("{}.{extension}", uuid::Uuid::new_v4().simple());
+    let object_name = up366_media::object_name(user_type, &uid, &object_file, chrono::Local::now());
     let ticket = adapters::upload_ticket(&client, &school_id, &object_name)
         .await
         .map_err(|error| state.session_error(&account_id, &client, error))?;
@@ -276,6 +292,21 @@ pub async fn readaloud_preview(
 ) -> CommandResult<ReadAloudPreviewView> {
     let (account_id, client) = state.require_client(Some(&account_id))?;
     let loaded = load_task(&state, &account_id, &client, &job_id).await?;
+    if is_submitted(
+        &state,
+        &account_id,
+        &client,
+        &job_id,
+        &loaded.course_id,
+        &loaded.job,
+    )
+    .await?
+    {
+        return Err(AppError::new(
+            "duplicate_submission",
+            "该作业已提交，不能重复提交",
+        ));
+    }
 
     let mut recordings = Vec::with_capacity(loaded.paper.questions.len());
     let mut slots = Vec::with_capacity(loaded.paper.questions.len());
@@ -579,7 +610,9 @@ async fn find_job(
 async fn is_submitted(
     state: &AppState,
     account_id: &AccountId,
+    client: &up366_protocol::Client,
     job_id: &str,
+    course_id: &str,
     job: &Job,
 ) -> CommandResult<bool> {
     if job.finished() {
@@ -591,9 +624,16 @@ async fn is_submitted(
         .job_status(account_id, &JobId::from(job_id))
         .await
         .map_err(storage_error)?;
-    Ok(status.is_some_and(|status| {
+    if status.is_some_and(|status| {
         status.task_status == Some(1) || status.stu_status.is_some_and(|value| value > 1)
-    }))
+    }) {
+        return Ok(true);
+    }
+    match adapters::course_finished_jobs(client, course_id).await {
+        Ok(rows) => Ok(rows.finished.iter().any(|row| row.id() == Some(job_id))),
+        Err(error) if client.is_expired() => Err(state.session_error(account_id, client, error)),
+        Err(_) => Ok(false),
+    }
 }
 
 fn storage_error(error: up366_store::StoreError) -> AppError {
