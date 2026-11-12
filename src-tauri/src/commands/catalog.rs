@@ -140,7 +140,7 @@ pub(crate) async fn refresh_catalog(
                 view.name.clone(),
                 view.label().to_owned(),
                 score,
-                false,
+                job.is_read_aloud_hint(),
                 Some(job_state),
             ));
             if let Some(record) = job_record(course_id, job, order, fetched_at) {

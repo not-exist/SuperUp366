@@ -325,6 +325,23 @@ impl Job {
             up366_core::JobKind::hint_from_title(self.title())
         }
     }
+
+    /// Cheap hint that a job contains read-aloud questions.
+    ///
+    /// The authoritative answer needs the paper (`question_type = 9`); this
+    /// only decides whether the UI offers the read-aloud page. Upstream names
+    /// such duties ".../逐句跟读" or ".../朗读".
+    pub fn is_read_aloud_hint(&self) -> bool {
+        let title = self.title();
+        if title.contains("跟读") || title.contains("朗读") {
+            return true;
+        }
+        self.ext_param
+            .as_ref()
+            .and_then(|ext| ext.get("openType").or_else(|| ext.get("open_type")))
+            .and_then(Value::as_str)
+            .is_some_and(|open| open.to_ascii_lowercase().contains("listenandread"))
+    }
 }
 
 fn ext_string(ext_param: &Option<Value>, key: &str) -> Option<String> {
@@ -992,6 +1009,33 @@ mod tests {
         .unwrap();
         assert!(!job.is_word_pk());
         assert_eq!(job.kind(), up366_core::JobKind::Unknown);
+    }
+
+    #[test]
+    fn read_aloud_hint_uses_the_title_and_open_type() {
+        let by_name = Job::from_value(json!({
+            "jobId": "JOB-3",
+            "jobName": "Unit 4/课文1/逐句跟读",
+            "extParam": {}
+        }))
+        .unwrap();
+        assert!(by_name.is_read_aloud_hint());
+
+        let by_open_type = Job::from_value(json!({
+            "jobId": "JOB-4",
+            "jobName": "Unit 4",
+            "extParam": "{\"openType\":\"ListenAndReadv1\"}"
+        }))
+        .unwrap();
+        assert!(by_open_type.is_read_aloud_hint());
+
+        let ordinary = Job::from_value(json!({
+            "jobId": "JOB-5",
+            "jobName": "Unit 3 阅读理解",
+            "extParam": {}
+        }))
+        .unwrap();
+        assert!(!ordinary.is_read_aloud_hint());
     }
 
     #[test]
