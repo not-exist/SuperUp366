@@ -12,11 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 use up366_core::{AccountId, RoundRequest};
-use up366_protocol::{
-    adapters,
-    adapters::WordPkSubmission,
-    dto::Word,
-};
+use up366_protocol::{adapters, adapters::WordPkSubmission, dto::Word};
 
 use crate::error::{AppError, CommandResult};
 use crate::session::AppState;

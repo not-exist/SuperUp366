@@ -71,10 +71,7 @@ mod tests {
 
     #[test]
     fn a_round_is_deterministic_for_the_same_seed() {
-        let request = RoundRequest {
-            score: 2,
-            total: 5,
-        };
+        let request = RoundRequest { score: 2, total: 5 };
         let first = draw(request, 20, 42);
         let second = draw(request, 20, 42);
         assert_eq!(first, second);
@@ -83,10 +80,7 @@ mod tests {
 
     #[test]
     fn drawn_indices_are_distinct_and_in_range() {
-        let request = RoundRequest {
-            score: 3,
-            total: 8,
-        };
+        let request = RoundRequest { score: 3, total: 8 };
         let picked = draw(request, 9, 7);
         assert_eq!(picked.len(), 8);
         let mut sorted = picked.clone();
@@ -98,19 +92,13 @@ mod tests {
 
     #[test]
     fn different_seeds_select_different_rounds() {
-        let request = RoundRequest {
-            score: 1,
-            total: 4,
-        };
+        let request = RoundRequest { score: 1, total: 4 };
         assert_ne!(draw(request, 30, 1), draw(request, 30, 2));
     }
 
     #[test]
     fn the_whole_pool_is_returned_when_total_covers_it() {
-        let request = RoundRequest {
-            score: 0,
-            total: 6,
-        };
+        let request = RoundRequest { score: 0, total: 6 };
         let mut picked = draw(request, 6, 99);
         picked.sort_unstable();
         assert_eq!(picked, (0..6).collect::<Vec<_>>());
@@ -118,21 +106,16 @@ mod tests {
 
     #[test]
     fn validation_rejects_impossible_rounds() {
-        assert!(RoundRequest { score: 0, total: 0 }
-            .validate(10)
-            .is_err());
-        assert!(RoundRequest { score: 3, total: 2 }
-            .validate(10)
-            .is_err());
-        assert!(RoundRequest { score: 1, total: 11 }
-            .validate(10)
-            .is_err());
-        assert!(RoundRequest { score: 0, total: 1 }
-            .validate(10)
-            .is_ok());
+        assert!(RoundRequest { score: 0, total: 0 }.validate(10).is_err());
+        assert!(RoundRequest { score: 3, total: 2 }.validate(10).is_err());
+        assert!(RoundRequest {
+            score: 1,
+            total: 11
+        }
+        .validate(10)
+        .is_err());
+        assert!(RoundRequest { score: 0, total: 1 }.validate(10).is_ok());
         // score == total means every drawn word is correct.
-        assert!(RoundRequest { score: 4, total: 4 }
-            .validate(4)
-            .is_ok());
+        assert!(RoundRequest { score: 4, total: 4 }.validate(4).is_ok());
     }
 }
