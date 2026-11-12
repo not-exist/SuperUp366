@@ -26,6 +26,16 @@ node_modules/
 *.bin
 /conversation-*.txt
 
+# Local session probes and scratch captures (may carry live TGT/cookies)
+.pw-*
+.playwright-*
+/.playwright-cli/
+/login.png
+/login2.yaml
+/123.txt
+/command-code-session-*.html
+/.commandcode/
+
 # Editor / OS
 .idea/
 .vscode/
