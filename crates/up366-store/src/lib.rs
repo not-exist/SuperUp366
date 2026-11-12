@@ -26,6 +26,7 @@ pub mod secrets;
 
 pub use db::{now_millis, Database};
 pub use repos::accounts::{AccountRecord, AccountsRepo, NewAccount};
+pub use repos::audio::{AudioAssetRecord, AudioRepo, NewAudioAsset};
 pub use repos::cache::{CacheRepo, CourseRecord, JobRecord, JobStatusRecord};
 pub use repos::settings::SettingsRepo;
 pub use secrets::{KeyringStore, MemoryStore, SecretStore, KEYRING_SERVICE};

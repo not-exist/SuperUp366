@@ -14,9 +14,6 @@ pub struct SettingsView {
     pub request_timeout_ms: u64,
     /// Background refresh interval in seconds; `0` disables it.
     pub refresh_interval_sec: u64,
-    /// Keeps the read-aloud submit button disabled until the protocol probe
-    /// confirms the submission payload.
-    pub read_aloud_dry_run: bool,
     /// Whether uploads of local recordings are kept after submission.
     pub keep_audio_files: bool,
 }
@@ -27,7 +24,6 @@ impl Default for SettingsView {
             concurrency: 6,
             request_timeout_ms: 20_000,
             refresh_interval_sec: 120,
-            read_aloud_dry_run: true,
             keep_audio_files: false,
         }
     }
@@ -98,13 +94,6 @@ fn storage_error(error: up366_store::StoreError) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn defaults_keep_the_unverified_read_aloud_submit_off() {
-        let settings = SettingsView::default();
-        assert!(settings.read_aloud_dry_run);
-        assert_eq!(settings.concurrency, 6);
-    }
 
     #[test]
     fn settings_round_trip_through_json() {

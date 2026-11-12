@@ -23,6 +23,7 @@ import type {
   JobStatus,
   JobStatusKind,
   ReadAloudPreview,
+  ReadAloudSubmit,
   ReadAloudTask,
   ReadAloudUpload,
   Settings,
@@ -377,24 +378,29 @@ const uploads = new Map<string, string>();
 
 function readAloudTask(jobId: string): ReadAloudTask {
   const job = jobs.find((row) => row.job_id === jobId);
+  const slots = readAloudSentences.map((sentence, index) => {
+    const questionId = `${jobId}-ra${index + 1}`;
+    return {
+      question_id: questionId,
+      number: index + 1,
+      sentence,
+      sentences: [sentence],
+      score: 10,
+      duration: 90,
+      audio_url: null,
+      // Simulates a slot whose recording was already uploaded.
+      record_url: uploads.get(questionId) ?? null,
+    };
+  });
   return {
     job_id: jobId,
     title: job?.name ?? "课文跟读",
     submitted: false,
-    slots: readAloudSentences.map((sentence, index) => {
-      const questionId = `${jobId}-ra${index + 1}`;
-      return {
-        question_id: questionId,
-        number: index + 1,
-        prompt: "朗读下面的句子",
-        sentence,
-        audio_url: null,
-        // Simulates a slot whose recording was already uploaded upstream.
-        record_url: uploads.get(questionId) ?? null,
-      };
-    }),
-    // Mirrors the backend: the submit path stays closed.
-    submission_enabled: false,
+    expired: false,
+    question_count: slots.length,
+    sentence_count: slots.length,
+    total_score: slots.reduce((sum, slot) => sum + slot.score, 0),
+    slots,
   };
 }
 
@@ -404,7 +410,6 @@ let settings: Settings = {
   concurrency: 4,
   request_timeout_ms: 15_000,
   refresh_interval_sec: 300,
-  read_aloud_dry_run: true,
   keep_audio_files: true,
 };
 
@@ -548,27 +553,64 @@ export async function handleMock(
         throw { code: "invalid_input", message: "只接受 mp3 文件", retryable: false };
       }
       await sleep(520);
-      // Mirrors the backend: validated locally, never uploaded.
+      const record_url = `https://mock.oss/${question_id}.mp3`;
+      uploads.set(question_id, record_url);
       return {
         ok: true,
         question_id,
         file_name,
         size: 1_024,
-        record_url: null,
+        record_url,
       } satisfies ReadAloudUpload;
     }
 
-    case "readaloud_submit": {
-      const { job_id } = args as CommandMap["readaloud_submit"]["args"];
-      const { dry_run } = args as CommandMap["readaloud_submit"]["args"];
-      await sleep(700);
+    case "readaloud_preview": {
+      const { job_id, scores } = args as CommandMap["readaloud_preview"]["args"];
+      await sleep(420);
       const task = readAloudTask(job_id);
+      const slots = task.slots.map((slot) => {
+        const score =
+          scores?.find((entry) => entry.question_id === slot.question_id)?.score ??
+          slot.score;
+        return {
+          question_id: slot.question_id,
+          number: slot.number,
+          sentence: slot.sentence,
+          score,
+          record_url: slot.record_url ?? "",
+        };
+      });
+      if (slots.some((slot) => !slot.record_url)) {
+        throw { code: "invalid_input", message: "还有题目没有上传录音", retryable: false };
+      }
       return {
         job_id,
         title: task.title,
-        payload: { jobId: job_id, slots: task.slots },
-        dry_run,
+        total_score: task.total_score,
+        reported_score: slots.reduce((sum, slot) => sum + slot.score, 0),
+        row: { studyTaskId: job_id, qstJson: [] },
+        slots,
+        confirm_token: "mock-readaloud-token",
       } satisfies ReadAloudPreview;
+    }
+
+    case "readaloud_submit": {
+      const { confirm_token } = args as CommandMap["readaloud_submit"]["args"];
+      await sleep(700);
+      if (confirm_token !== "mock-readaloud-token") {
+        throw {
+          code: "confirmation_expired",
+          message: "确认已过期或已使用，请重新预览",
+          retryable: false,
+        };
+      }
+      return {
+        ok: true,
+        verified: true,
+        score: 30,
+        batch_id: "mock-batch",
+        message: "提交成功（预览环境，未发送到服务器）。",
+      } satisfies ReadAloudSubmit;
     }
 
     case "correction_overview": {

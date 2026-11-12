@@ -31,6 +31,7 @@ pub struct JobRecord {
     pub content_id: Option<String>,
     pub book_id: Option<String>,
     pub chapter_id: Option<String>,
+    pub paper_id: Option<String>,
     pub name: String,
     pub order_index: i64,
     pub raw_json: String,
@@ -123,12 +124,13 @@ impl CacheRepo {
             sqlx::query(
                 "INSERT INTO jobs (
                      account_id, course_id, job_id, content_id, book_id, chapter_id,
-                     name, order_index, raw_json, fetched_at
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     paper_id, name, order_index, raw_json, fetched_at
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT(account_id, course_id, job_id) DO UPDATE SET
                      content_id  = excluded.content_id,
                      book_id     = excluded.book_id,
                      chapter_id  = excluded.chapter_id,
+                     paper_id    = excluded.paper_id,
                      name        = excluded.name,
                      order_index = excluded.order_index,
                      raw_json    = excluded.raw_json,
@@ -140,6 +142,7 @@ impl CacheRepo {
             .bind(&job.content_id)
             .bind(&job.book_id)
             .bind(&job.chapter_id)
+            .bind(&job.paper_id)
             .bind(&job.name)
             .bind(job.order_index)
             .bind(&job.raw_json)
@@ -178,7 +181,7 @@ impl CacheRepo {
     ) -> Result<Vec<JobRecord>> {
         let cutoff = cutoff(max_age);
         let mut sql = String::from(
-            "SELECT course_id, job_id, content_id, book_id, chapter_id,
+            "SELECT course_id, job_id, content_id, book_id, chapter_id, paper_id,
                     name, order_index, raw_json, fetched_at
              FROM jobs WHERE account_id = ?",
         );
@@ -311,6 +314,7 @@ fn map_job(row: &sqlx::sqlite::SqliteRow) -> Result<JobRecord> {
         content_id: row.try_get("content_id")?,
         book_id: row.try_get("book_id")?,
         chapter_id: row.try_get("chapter_id")?,
+        paper_id: row.try_get("paper_id")?,
         name: row.try_get("name")?,
         order_index: row.try_get("order_index")?,
         raw_json: row.try_get("raw_json")?,
@@ -361,6 +365,7 @@ mod tests {
             content_id: Some(format!("content-{id}")),
             book_id: None,
             chapter_id: None,
+            paper_id: None,
             name: format!("job-{id}"),
             order_index: order,
             raw_json: "{}".into(),

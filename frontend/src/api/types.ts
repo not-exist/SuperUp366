@@ -206,11 +206,16 @@ export type UploadStatus = "idle" | "validating" | "ready" | "uploading" | "uplo
 export interface ReadAloudSlot {
   question_id: string;
   number: number;
-  prompt: string;
+  /** All sentences of the question, joined for display. */
   sentence: string;
-  /** Reference audio supplied by the server, if any. */
+  sentences: string[];
+  /** Question maximum score. */
+  score: number;
+  /** Reference duration in seconds. */
+  duration: number;
+  /** Reference audio supplied by the server, when absolute. */
   audio_url: string | null;
-  /** Set once a recording has been uploaded; `null` means "ready" only. */
+  /** Set once a recording has been uploaded. */
   record_url: string | null;
 }
 
@@ -218,9 +223,13 @@ export interface ReadAloudTask {
   job_id: string;
   title: string;
   submitted: boolean;
+  /** Expired jobs can still be submitted; the UI only warns. */
+  expired: boolean;
+  /** Detected from the paper, not guessed. */
+  question_count: number;
+  sentence_count: number;
+  total_score: number;
   slots: ReadAloudSlot[];
-  /** Always false until the submission payload is confirmed. */
-  submission_enabled: boolean;
 }
 
 export interface ReadAloudUpload {
@@ -228,17 +237,35 @@ export interface ReadAloudUpload {
   question_id: string;
   file_name: string;
   size: number;
-  /** `null` until the OSS transfer is wired: the slot is "ready", not uploaded. */
-  record_url: string | null;
+  record_url: string;
+}
+
+export interface ReadAloudPreviewSlot {
+  question_id: string;
+  number: number;
+  sentence: string;
+  score: number;
+  record_url: string;
 }
 
 export interface ReadAloudPreview {
   job_id: string;
   title: string;
-  /** The exact payload a submission would carry. */
-  payload: Record<string, unknown>;
-  /** True when nothing was sent. */
-  dry_run: boolean;
+  total_score: number;
+  reported_score: number;
+  /** The exact row a submission would carry. */
+  row: Record<string, unknown>;
+  slots: ReadAloudPreviewSlot[];
+  /** Single-use token for `readaloud_submit`. */
+  confirm_token: string;
+}
+
+export interface ReadAloudSubmit {
+  ok: boolean;
+  verified: boolean;
+  score: number | null;
+  batch_id: string | null;
+  message: string;
 }
 
 export interface Settings {
@@ -246,11 +273,6 @@ export interface Settings {
   concurrency: number;
   request_timeout_ms: number;
   refresh_interval_sec: number;
-  /**
-   * Protocol note: read-aloud submission shape is not confirmed yet, so the
-   * app stops at upload verification and a dry run.
-   */
-  read_aloud_dry_run: boolean;
   keep_audio_files: boolean;
 }
 
@@ -308,9 +330,17 @@ export interface CommandMap {
     };
     result: ReadAloudUpload;
   };
-  readaloud_submit: {
-    args: { account_id: string; job_id: string; dry_run: boolean };
+  readaloud_preview: {
+    args: {
+      account_id: string;
+      job_id: string;
+      scores?: { question_id: string; score: number }[];
+    };
     result: ReadAloudPreview;
+  };
+  readaloud_submit: {
+    args: { confirm_token: string };
+    result: ReadAloudSubmit;
   };
 
   correction_overview: {

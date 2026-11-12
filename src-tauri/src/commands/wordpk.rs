@@ -394,6 +394,7 @@ mod tests {
             content_id: None,
             book_id: None,
             chapter_id: None,
+            paper_id: None,
             name: "10.30 单词PK".to_owned(),
             order_index: 0,
             raw_json: serde_json::json!({
@@ -415,6 +416,7 @@ mod tests {
             content_id: None,
             book_id: None,
             chapter_id: None,
+            paper_id: None,
             name: "普通作业".to_owned(),
             order_index: 0,
             raw_json: serde_json::json!({"extParam": "{}"}).to_string(),
