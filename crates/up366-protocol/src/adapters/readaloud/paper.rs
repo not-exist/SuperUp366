@@ -72,6 +72,12 @@ pub fn parse_paper(xml: &str, path_prefix: &str) -> Result<ReadAloudPaper> {
     let mut non_read_aloud = 0;
     for partial in parsed {
         let question = partial.into_question();
+        // `<element type="0">` group captions (`<element_caption>`) carry no
+        // `question_type`. They are layout nodes, not questions, and counting
+        // them made every read-aloud paper with a section title look mixed.
+        if question.question_type.trim().is_empty() {
+            continue;
+        }
         if question.question_type.trim() != "9" {
             non_read_aloud += 1;
             continue;
@@ -393,6 +399,21 @@ mod tests {
             Some("https://cdn.example/storage/Q1/media/a.mp3")
         );
         assert_eq!(paper.questions[1].number, 2);
+    }
+
+    #[test]
+    fn group_captions_are_not_questions() {
+        let paper = r#"<elements>
+            <element type="0" id="1">
+                <element_caption><![CDATA[9月16日的朗读]]></element_caption>
+                <is_group_text>0</is_group_text>
+            </element>
+            <element id='Q1' type='3'><question_type>9</question_type><question_score>10</question_score></element>
+        </elements>"#;
+        let paper = parse_paper(paper, "").unwrap();
+        assert_eq!(paper.questions.len(), 1);
+        assert_eq!(paper.non_read_aloud, 0);
+        assert!(paper.require_all_read_aloud().is_ok());
     }
 
     #[test]
