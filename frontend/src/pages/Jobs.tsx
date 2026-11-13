@@ -25,13 +25,16 @@ import {
 } from "../utils";
 
 type StatusFilter = "all" | JobStatusKind;
-type KindFilter = "all" | JobKind;
+/** Read-aloud is a paper property, not a `JobKind`, but users filter it as one. */
+type KindFilter = "all" | JobKind | "read_aloud";
 
 const KIND_LABELS: Record<JobKind, string> = {
   ordinary: "普通作业",
   word_pk: "单词 PK",
   unknown: "类型未知",
 };
+
+const READ_ALOUD_LABEL = "跟读作业";
 
 function kindLabel(job: JobRow): string | null {
   if (job.kind === "word_pk") return "单词 PK";
@@ -55,7 +58,10 @@ export function Jobs() {
     const needle = search.trim().toLowerCase();
     return (jobs.data ?? []).filter((job) => {
       if (status !== "all" && job.status.kind !== status) return false;
-      if (kind !== "all" && job.kind !== kind) return false;
+      if (kind === "read_aloud" && !job.read_aloud) return false;
+      if (kind !== "all" && kind !== "read_aloud" && job.kind !== kind) {
+        return false;
+      }
       if (!needle) return true;
       return (
         job.name.toLowerCase().includes(needle) ||
@@ -157,6 +163,7 @@ export function Jobs() {
             <option value="all">全部类型</option>
             <option value="ordinary">{KIND_LABELS.ordinary}</option>
             <option value="word_pk">{KIND_LABELS.word_pk}</option>
+            <option value="read_aloud">{READ_ALOUD_LABEL}</option>
             <option value="unknown">{KIND_LABELS.unknown}</option>
           </select>
         </div>
