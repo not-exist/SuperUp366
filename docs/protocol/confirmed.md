@@ -91,8 +91,12 @@ fields marks everything pending or expired. The authoritative rows come from
 The shelf is the union of `/client/books/buy-book` (purchased goods) and
 `data[].books` from `/client/student/course/list` (class-assigned books such as
 新概念英语). The two lists overlap, so entries are deduplicated by `bookId`.
-`book_info` / `books/tree` still take `bookType=1`, matching the PC client,
-which hardcodes that value; for a `bookType=2` course book the tree is empty.
+`book_info` / `books/tree` take the shelf's `bookType`. The PC client
+hardcodes `1` because its shelf (`buy-book`) only contains purchased books, but
+class-assigned course books are `bookType=2`: asking `book_info` for one of
+those as type 1 answers `code: 0` with no `data` (verified on 新概念英语2,
+语法专项练习, 同步英语培优计划-同步词汇, 假期充电周), while `bookType=2` returns
+the record. `books/tree` is empty for `bookType=2` books either way.
 
 The assignment list is `tasks`; a page only links to one through `taskId`, and
 many chapters (for example 测验) have a task and no page at all. Iterating

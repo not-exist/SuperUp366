@@ -184,6 +184,7 @@ const bookSeeds: Book[] = [
     subject: "英语",
     cover_url: null,
     is_2025_reader: false,
+    book_type: 1,
   },
   {
     book_id: "book-2",
@@ -191,6 +192,7 @@ const bookSeeds: Book[] = [
     subject: "英语",
     cover_url: null,
     is_2025_reader: false,
+    book_type: 1,
   },
   {
     book_id: "book-3",
@@ -198,6 +200,7 @@ const bookSeeds: Book[] = [
     subject: "英语",
     cover_url: null,
     is_2025_reader: true,
+    book_type: 1,
   },
 ];
 
@@ -497,6 +500,7 @@ export async function handleMock(
         subject: book.subject,
         cover_url: book.cover_url,
         is_2025_reader: book.is_2025_reader,
+        book_type: book.book_type,
       }));
     }
 

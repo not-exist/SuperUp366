@@ -36,14 +36,18 @@ pub async fn course_books(client: &Client) -> Result<Vec<Book>> {
 }
 
 /// `data` object from `/client/v2/book/info`.
-pub async fn book_info(client: &Client, book_id: &str) -> Result<Book> {
+///
+/// `book_type` must be the shelf's `bookType`: a class-assigned book (type 2)
+/// asked for as type 1 answers `code: 0` with no `data`, which is exactly the
+/// protocol drift this parameter prevents.
+pub async fn book_info(client: &Client, book_id: &str, book_type: i64) -> Result<Book> {
     let endpoint = endpoint("book_info")?;
     let data = client
         .call(
             endpoint,
             &[
                 ("bookId", json!(book_id)),
-                ("bookType", json!(1)),
+                ("bookType", json!(book_type)),
                 ("originalBookId", json!("")),
             ],
         )
@@ -52,7 +56,7 @@ pub async fn book_info(client: &Client, book_id: &str) -> Result<Book> {
 }
 
 /// `data` tree from `/client/books/tree`. `version=""` forces a fresh tree.
-pub async fn book_tree(client: &Client, book_id: &str) -> Result<BookTree> {
+pub async fn book_tree(client: &Client, book_id: &str, book_type: i64) -> Result<BookTree> {
     let endpoint = endpoint("book_tree")?;
     let data = client
         .call(
@@ -60,7 +64,7 @@ pub async fn book_tree(client: &Client, book_id: &str) -> Result<BookTree> {
             &[
                 ("bookId", json!(book_id)),
                 ("version", json!("")),
-                ("bookType", json!(1)),
+                ("bookType", json!(book_type)),
             ],
         )
         .await?;
@@ -165,21 +169,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn book_info_sends_fixed_book_type_and_original_id() {
+    async fn book_info_sends_the_shelf_book_type_and_empty_original_id() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/v2/book/info")
                 .body_contains("bookId=BOOK-2")
-                .body_contains("bookType=1")
+                .body_contains("bookType=2")
                 .body_contains("originalBookId=");
             then.status(200).json_body(ok(
-                json!({ "bookId": "BOOK-2", "bookName": "数学", "packType": 7 }),
+                json!({ "bookId": "BOOK-2", "bookName": "数学", "bookType": 2, "packType": 7 }),
             ));
         });
 
         let client = client(&server);
-        let book = book_info(&client, "BOOK-2").await.unwrap();
+        let book = book_info(&client, "BOOK-2", 2).await.unwrap();
+        assert_eq!(book.book_type(), 2);
         assert_eq!(book.title(), "数学");
         assert!(!book.is_2025_reader());
         mock.assert_hits(1);
@@ -193,7 +198,7 @@ mod tests {
                 .path("/client/books/tree")
                 .body_contains("bookId=BOOK-1")
                 .body_contains("version=")
-                .body_contains("bookType=1");
+                .body_contains("bookType=2");
             then.status(200).json_body(ok(json!({
                 "version": "v42",
                 "book": { "configs": { "customFlag": 1 } },
@@ -204,7 +209,7 @@ mod tests {
         });
 
         let client = client(&server);
-        let tree = book_tree(&client, "BOOK-1").await.unwrap();
+        let tree = book_tree(&client, "BOOK-1", 2).await.unwrap();
 
         assert_eq!(tree.version.as_deref(), Some("v42"));
         assert!(tree.has_custom_chapters());

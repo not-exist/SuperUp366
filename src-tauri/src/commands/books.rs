@@ -38,6 +38,9 @@ pub struct BookListItem {
     pub cover_url: Option<String>,
     /// `packType == 9` books use the newer reader.
     pub is_2025_reader: bool,
+    /// 1 = purchased, 2 = class-assigned. `book_detail` must send it back: a
+    /// type-2 book requested as type 1 has no `data` in `book_info`.
+    pub book_type: i64,
 }
 
 /// One page of a book, rendered as a job row.
@@ -117,6 +120,7 @@ fn shelf_items(purchased: &[Book], assigned: &[Book]) -> Vec<BookListItem> {
             subject: book.subject_id.clone().unwrap_or_default(),
             cover_url: book.cover().map(str::to_owned),
             is_2025_reader: book.is_2025_reader(),
+            book_type: book.book_type(),
         });
     }
     items
@@ -127,13 +131,14 @@ fn shelf_items(purchased: &[Book], assigned: &[Book]) -> Vec<BookListItem> {
 pub async fn book_detail(
     account_id: String,
     book_id: String,
+    book_type: i64,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<BookDetailView> {
     let (account_id, client) = state.require_client(Some(&account_id))?;
-    let book = adapters::book_info(&client, &book_id)
+    let book = adapters::book_info(&client, &book_id, book_type)
         .await
         .map_err(|error| state.session_error(&account_id, &client, error))?;
-    let tree = adapters::book_tree(&client, &book_id)
+    let tree = adapters::book_tree(&client, &book_id, book_type)
         .await
         .map_err(|error| state.session_error(&account_id, &client, error))?;
     let finished = adapters::finished_tasks(&client, &book_id)
@@ -497,7 +502,10 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].book_id, "B-1");
         assert_eq!(items[0].cover_url.as_deref(), Some("cover-1"));
+        // A purchased row without `bookType` keeps the PC client's default.
+        assert_eq!(items[0].book_type, 1);
         assert_eq!(items[1].book_id, "B-2");
         assert_eq!(items[1].name, "新概念英语1");
+        assert_eq!(items[1].book_type, 2);
     }
 }

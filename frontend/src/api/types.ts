@@ -67,6 +67,8 @@ export interface Book {
   cover_url: string | null;
   /** `packType == 9` books use the newer reader. */
   is_2025_reader: boolean;
+  /** 1 = purchased, 2 = class-assigned. The detail call must send it back. */
+  book_type: number;
 }
 
 export interface BookJob {
@@ -300,7 +302,7 @@ export interface CommandMap {
 
   books_list: { args: { account_id: string }; result: Book[] };
   book_detail: {
-    args: { account_id: string; book_id: string };
+    args: { account_id: string; book_id: string; book_type: number };
     result: BookDetail;
   };
 

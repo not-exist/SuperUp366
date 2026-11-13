@@ -517,6 +517,11 @@ pub struct Book {
     pub goods_vertical_img: Option<String>,
     #[serde(default, deserialize_with = "flex::opt_string")]
     pub vertical_cover: Option<String>,
+    /// 1 = purchased/reader book, 2 = course-assigned book. `book_info` and
+    /// `books/tree` need the real value; a type-2 book asked for as type 1
+    /// answers `data: null`.
+    #[serde(default, deserialize_with = "flex::opt_i64")]
+    pub book_type: Option<i64>,
     #[serde(default, deserialize_with = "flex::opt_i64")]
     pub pack_type: Option<i64>,
     #[serde(default, deserialize_with = "flex::opt_string")]
@@ -571,6 +576,15 @@ impl Book {
     /// `packType == 9` selects the 2025 reader.
     pub fn is_2025_reader(&self) -> bool {
         self.pack_type == Some(9)
+    }
+
+    /// `bookType` to send back to the book endpoints.
+    ///
+    /// Purchased books are type 1 and class-assigned course books are type 2.
+    /// The server answers `data: null` when a type-2 book is requested as type
+    /// 1, so the shelf value has to be reused instead of hardcoding it.
+    pub fn book_type(&self) -> i64 {
+        self.book_type.unwrap_or(1)
     }
 }
 

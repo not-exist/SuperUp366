@@ -23,8 +23,12 @@ export const api = {
 
   listBooks: (accountId: string) =>
     invokeCommand("books_list", { account_id: accountId }),
-  getBook: (accountId: string, bookId: string) =>
-    invokeCommand("book_detail", { account_id: accountId, book_id: bookId }),
+  getBook: (accountId: string, bookId: string, bookType: number) =>
+    invokeCommand("book_detail", {
+      account_id: accountId,
+      book_id: bookId,
+      book_type: bookType,
+    }),
 
   getAnswer: (accountId: string, jobId: string) =>
     invokeCommand("answer_get", { account_id: accountId, job_id: jobId }),

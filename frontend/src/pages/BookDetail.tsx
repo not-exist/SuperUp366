@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/commands";
 import type { BookChapter } from "../api/types";
@@ -16,11 +16,15 @@ const CHAPTER_PAGE_SIZE = 100;
 
 export function BookDetail() {
   const { bookId } = useParams();
+  const [params] = useSearchParams();
   const account = useAccount();
+  // The shelf carries the real `bookType`; a type-2 book fails `book_info` if
+  // it is requested as type 1. A direct URL without it falls back to 1.
+  const bookType = Number(params.get("type")) || 1;
 
   const detail = useQuery({
-    queryKey: ["book", account.account_id, bookId],
-    queryFn: () => api.getBook(account.account_id, bookId ?? ""),
+    queryKey: ["book", account.account_id, bookId, bookType],
+    queryFn: () => api.getBook(account.account_id, bookId ?? "", bookType),
     enabled: Boolean(bookId),
   });
 
