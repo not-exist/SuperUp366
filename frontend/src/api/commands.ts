@@ -36,6 +36,21 @@ export const api = {
       course_id: courseId,
     }),
 
+  getBookTask: (
+    accountId: string,
+    bookId: string,
+    courseId: string | null,
+    taskId: string,
+    wordTask: boolean,
+  ) =>
+    invokeCommand("book_task_get", {
+      account_id: accountId,
+      book_id: bookId,
+      course_id: courseId,
+      task_id: taskId,
+      word_task: wordTask,
+    }),
+
   getAnswer: (accountId: string, jobId: string) =>
     invokeCommand("answer_get", { account_id: accountId, job_id: jobId }),
 

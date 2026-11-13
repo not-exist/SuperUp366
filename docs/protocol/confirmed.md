@@ -119,6 +119,23 @@ sets. The shelf response carries no task counts and no display name for
 fetching the tree. Nested chapters are navigation only: a task belongs to its
 nearest top-level ancestor.
 
+The official book detail view does not use `books/tree`. It reads
+`dsb-api /client/student/chapter-task-score/list` with
+`courseId, bookId, uid`, which returns one flat array of chapters
+(`nodeType = 1`) and assignments (`nodeType = 2`). `cid` is the same id
+`finished-task/list` keys on (a task id for ordinary books, a content page id
+for type-2 course books), and `taskType = 2` marks a vocabulary assignment
+(`1` is an ordinary paper). The course is required: purchased books have none
+on the shelf, but any course the student belongs to answers the same tree.
+
+Opening one assignment is read-only and also keyed on
+`(courseId, bookId, taskId, uid)`:
+`/client/question/student/task/question-score/list` returns question rows
+(`questionTypeNum`, `myAnswer`, `correctAnswer`, scores), and
+`/client/word/task/student/word-skill-get/list` returns `{word, pass, ...}` for
+a vocabulary task. In question rows, `questionTypeNum` 9/12/13 are recordings
+and `myAnswer` is the student's audio URL.
+
 ## Answer detail
 
 `data.paperInfo.paperData` (paper XML), `data.paperInfo.answerData` (correct
@@ -133,6 +150,9 @@ including one expired job the server still accepted.
 
 - Question type marker: `question_type = 9`; one recording per **question**,
   not per sentence. The paper's `<attachment>` holds the sentences.
+- `<element type="0">` nodes are group captions (`<element_caption>`), not
+  questions: they carry no `question_type` and must be ignored when deciding
+  whether a paper is read-aloud-only.
 - Paper source: `GET /client/paper/detail?paperId=`, `data.paperData` plus
   `data.pathPrefix`.
 - OSS object name: `storage/{userType}/study/a/{yyyy/mm/dd}/{uid}/{file}`.

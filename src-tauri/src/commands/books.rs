@@ -1,25 +1,24 @@
-//! Book commands: shelf and book detail.
+//! Book commands: shelf, book detail and the per-task detail view.
 //!
-//! A book's tree is three flat arrays: `chapters` (type 1), `pages` (type 2)
-//! and `tasks` (type 3). Each page carries the task it belongs to in
-//! `taskId`, and `/client/book/finished-task/list` reports finished tasks by
-//! the same id, so progress is a set intersection — no per-page request.
-//!
-//! The detail view groups pages under their **top-level** chapter: nested
-//! chapters are only navigation, and a book like 《探索·发现》 has 2535 leaf
-//! chapters with one page each under two top-level chapters.
+//! The detail list comes from `/client/student/chapter-task-score/list`, the
+//! endpoint the official reader uses. It returns the book's chapters and
+//! assignments as one flat array; each assignment's `cid` is also the id that
+//! `/client/book/finished-task/list` keys on, so progress is a set
+//! intersection. `taskType = 2` marks a vocabulary assignment; every other
+//! row is an ordinary paper. Clicking a row opens its read-only detail, which
+//! the upstream endpoints can answer without a job row.
 
 use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
-use serde_json::Value as JsonValue;
 use up366_core::JobKind;
 use up366_protocol::{
     adapters,
-    dto::{Book, BookTree, FinishedTask},
+    dto::{Book, BookTaskNode, FinishedTask},
 };
 
-use crate::error::CommandResult;
+use crate::commands::uid_for;
+use crate::error::{AppError, CommandResult};
 use crate::session::AppState;
 use crate::state::StatusView;
 
@@ -28,8 +27,8 @@ use crate::state::StatusView;
 const MAX_CHAPTER_DEPTH: usize = 16;
 
 /// One shelf entry. Deliberately metadata only: computing progress needs the
-/// whole tree (megabytes for a large book), so it is only done on the detail
-/// page.
+/// whole assignment list (megabytes for a large book), so it is only done on
+/// the detail page.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BookListItem {
     pub book_id: String,
@@ -41,8 +40,9 @@ pub struct BookListItem {
     /// 1 = purchased, 2 = class-assigned. `book_detail` must send it back: a
     /// type-2 book requested as type 1 has no `data` in `book_info`.
     pub book_type: i64,
-    /// The course that assigned this book, when one did. `books/tree` returns
-    /// some assigned books (新概念英语1) only when the course is passed.
+    /// The course that assigned this book, when one did. The book detail
+    /// endpoint always needs a course, so a purchased row leaves this empty
+    /// and the command falls back to the account's first course.
     pub course_id: Option<String>,
 }
 
@@ -77,9 +77,12 @@ pub struct BookDetailView {
     pub subject: String,
     pub cover_url: Option<String>,
     pub is_2025_reader: bool,
+    /// The course the task list was read in. Purchased books carry no course
+    /// on the shelf, so the command picks the account's first one.
+    pub course_id: String,
     /// Assignments that appear in the finished-task list.
     pub progress: usize,
-    /// Assignments the tree lists.
+    /// Assignments the reader lists.
     pub total: usize,
     /// Not exposed by the book payloads observed so far.
     pub teacher_name: Option<String>,
@@ -167,24 +170,16 @@ pub async fn book_detail(
     let book = adapters::book_info(&client, &book_id, book_type)
         .await
         .map_err(|error| state.session_error(&account_id, &client, error))?;
-    let mut tree = adapters::book_tree(&client, &book_id, book_type, None)
+    let course_id = effective_course(&state, &account_id, &client, course_id).await?;
+    let uid = uid_for(&state, &account_id, &client).await?;
+    let nodes = adapters::book_task_nodes(&client, &course_id, &book_id, &uid)
         .await
         .map_err(|error| state.session_error(&account_id, &client, error))?;
-    // 新概念英语1 (and other course content books) answer an empty tree unless
-    // the assigning course rides along; retry only when the first answer has
-    // no usable content, because an unrelated course empties some other books.
-    if !tree_has_content(&tree) {
-        if let Some(course_id) = course_id.as_deref() {
-            tree = adapters::book_tree(&client, &book_id, book_type, Some(course_id))
-                .await
-                .map_err(|error| state.session_error(&account_id, &client, error))?;
-        }
-    }
     let finished = adapters::finished_tasks(&client, &book_id)
         .await
         .map_err(|error| state.session_error(&account_id, &client, error))?;
 
-    let (chapters, progress, total) = chapters_from_tree(&tree, &finished);
+    let (chapters, progress, total) = chapters_from_nodes(&nodes, &finished);
 
     Ok(BookDetailView {
         book_id: book.id().unwrap_or_default().to_owned(),
@@ -192,6 +187,7 @@ pub async fn book_detail(
         subject: book.subject_id.clone().unwrap_or_default(),
         cover_url: book.cover().map(str::to_owned),
         is_2025_reader: book.is_2025_reader(),
+        course_id,
         progress,
         total,
         teacher_name: None,
@@ -199,103 +195,197 @@ pub async fn book_detail(
     })
 }
 
-/// Whether the tree carries rows the detail page can render.
+/// The course whose task list is read.
 ///
-/// Chapters alone are an empty page: jobs come from `tasks` or from type-2
-/// content pages, so either one has to be present.
-fn tree_has_content(tree: &BookTree) -> bool {
-    !tree.pages.is_empty() || !tree.tasks.is_empty()
+/// The shelf sends the assigning course for a class book. A purchased book has
+/// none, but the score endpoint requires one and any course the student belongs
+/// to answers the same tree, so the account's first course is used.
+async fn effective_course(
+    state: &AppState,
+    account_id: &up366_core::AccountId,
+    client: &up366_protocol::Client,
+    course_id: Option<String>,
+) -> CommandResult<String> {
+    if let Some(course_id) = course_id.filter(|id| !id.trim().is_empty()) {
+        return Ok(course_id);
+    }
+    let cached = state
+        .db
+        .cache()
+        .courses(account_id, None)
+        .await
+        .map_err(|error| AppError::new("storage_error", error.to_string()))?;
+    if let Some(course) = cached.first() {
+        return Ok(course.course_id.to_string());
+    }
+    let courses = adapters::courses(client)
+        .await
+        .map_err(|error| state.session_error(account_id, client, error))?;
+    courses
+        .first()
+        .and_then(|course| course.id())
+        .map(str::to_owned)
+        .ok_or_else(|| AppError::new("invalid_input", "账号没有班级，无法读取书本作业"))
 }
 
-/// Group every task under the top-level chapter that owns it.
+/// One question of a book assignment, as the reader shows it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BookQuestionView {
+    pub question_id: String,
+    pub number: String,
+    pub type_name: String,
+    pub knowledge: String,
+    /// A recording URL for read-aloud questions, an answer string otherwise.
+    pub my_answer: String,
+    pub correct_answer: String,
+    pub max_score: Option<f64>,
+    pub score: Option<f64>,
+    pub class_average: Option<f64>,
+    pub score_rate: Option<f64>,
+    pub read_aloud: bool,
+}
+
+/// One vocabulary row of a book assignment.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BookWordView {
+    pub word: String,
+    pub mastered: bool,
+}
+
+/// Read-only detail of one book assignment.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BookTaskView {
+    pub task_id: String,
+    pub kind: JobKind,
+    /// Whether any question is a recording (`questionTypeNum` 9/12/13).
+    pub read_aloud: bool,
+    pub questions: Vec<BookQuestionView>,
+    pub words: Vec<BookWordView>,
+}
+
+/// Open one book assignment: vocabulary rows or its question rows.
 ///
-/// A book's assignments live in `tasks` (type 3); a page (type 2) only links to
-/// one through `taskId`. Building from pages alone misses every task whose
-/// chapter has no page (the "测验" nodes), which is what made large books look
-/// incomplete. Tasks are authoritative, and a page contributes its display name
-/// when one links to the task.
+/// A book task id is not a job id, so this deliberately does not go through
+/// the job cache. The upstream detail endpoints key on
+/// `(courseId, bookId, taskId, uid)` and work for finished and unfinished
+/// assignments alike.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn book_task_get(
+    account_id: String,
+    book_id: String,
+    course_id: Option<String>,
+    task_id: String,
+    word_task: bool,
+    state: tauri::State<'_, AppState>,
+) -> CommandResult<BookTaskView> {
+    let (account_id, client) = state.require_client(Some(&account_id))?;
+    let course_id = effective_course(&state, &account_id, &client, course_id).await?;
+    let uid = uid_for(&state, &account_id, &client).await?;
+
+    if word_task {
+        let words = adapters::book_task_words(&client, &course_id, &book_id, &task_id, &uid)
+            .await
+            .map_err(|error| state.session_error(&account_id, &client, error))?;
+        return Ok(BookTaskView {
+            task_id,
+            kind: JobKind::WordPk,
+            read_aloud: false,
+            questions: Vec::new(),
+            words: words
+                .into_iter()
+                .map(|row| {
+                    let mastered = row.mastered();
+                    BookWordView {
+                        word: row.word,
+                        mastered,
+                    }
+                })
+                .collect(),
+        });
+    }
+
+    let rows = adapters::book_task_questions(&client, &course_id, &book_id, &task_id, &uid)
+        .await
+        .map_err(|error| state.session_error(&account_id, &client, error))?;
+    let read_aloud = rows.iter().any(|row| row.is_read_aloud());
+    Ok(BookTaskView {
+        task_id,
+        kind: JobKind::Ordinary,
+        read_aloud,
+        questions: rows
+            .into_iter()
+            .map(|row| {
+                let read_aloud = row.is_read_aloud();
+                BookQuestionView {
+                    question_id: row.question_id,
+                    number: row.question_no,
+                    type_name: row.qst_type_name,
+                    knowledge: row.knowledge,
+                    my_answer: row.my_answer,
+                    correct_answer: row.correct_answer,
+                    max_score: row.question_score,
+                    score: row.score,
+                    class_average: row.avg_score,
+                    score_rate: row.score_rate,
+                    read_aloud,
+                }
+            })
+            .collect(),
+        words: Vec::new(),
+    })
+}
+
+/// Group every assignment under the top-level chapter that owns it.
 ///
-/// Order is the upstream array order for chapters, tasks and pages; nothing is
-/// re-sorted. Returns the chapters plus `(progress, total)`; a task counts as
+/// The upstream list is flat: chapters (`nodeType = 1`) and assignments
+/// (`nodeType = 2`). Order is the upstream array order; nothing is re-sorted.
+/// Returns the chapters plus `(progress, total)`; an assignment counts as
 /// finished when its id appears in the finished-task list.
-fn chapters_from_tree(
-    tree: &BookTree,
+fn chapters_from_nodes(
+    nodes: &[BookTaskNode],
     finished: &[FinishedTask],
 ) -> (Vec<ChapterView>, usize, usize) {
-    // chapter id -> parent id ("" for roots). Keeping the ids in one map lets
-    // both the root test and the ancestor walk share the same lookup.
-    let parents: HashMap<&str, &str> = tree
-        .chapters
+    let parents: HashMap<&str, &str> = nodes
         .iter()
-        .filter_map(|chapter| Some((chapter.id()?, chapter.parent_id.as_deref().unwrap_or(""))))
+        .filter(|node| node.is_chapter())
+        .map(|node| (node.cid.as_str(), node.pid.as_deref().unwrap_or("")))
         .collect();
     let chapter_ids: HashSet<&str> = parents.keys().copied().collect();
 
     let mut chapters: Vec<ChapterView> = Vec::new();
     let mut top_index: HashMap<&str, usize> = HashMap::new();
-    let mut chapter_titles: HashMap<&str, &str> = HashMap::new();
-    for chapter in &tree.chapters {
-        let Some(id) = chapter.id() else { continue };
-        chapter_titles.insert(id, chapter.title());
-        if chapter_ids.contains(chapter.parent_id.as_deref().unwrap_or("")) {
+    for node in nodes.iter().filter(|node| node.is_chapter()) {
+        if node
+            .pid
+            .as_deref()
+            .is_some_and(|parent| chapter_ids.contains(parent))
+        {
             continue;
         }
-        top_index.insert(id, chapters.len());
+        top_index.insert(node.cid.as_str(), chapters.len());
         chapters.push(ChapterView {
-            chapter_id: id.to_owned(),
-            title: chapter.title().to_owned(),
+            chapter_id: node.cid.clone(),
+            title: node.node_name.clone(),
             jobs: Vec::new(),
         });
     }
 
-    // taskId -> display name from the page that links to it.
-    let mut page_names: HashMap<&str, &str> = HashMap::new();
-    for page in &tree.pages {
-        let Some(page) = page.as_object() else {
-            continue;
-        };
-        let Some(task_id) = page
-            .get("taskId")
-            .and_then(JsonValue::as_str)
-            .filter(|id| !id.is_empty())
-        else {
-            continue;
-        };
-        if let Some(name) = page.get("name").and_then(JsonValue::as_str) {
-            page_names.entry(task_id).or_insert(name);
-        }
-    }
-
-    // taskId -> score. A task that is absent from this map is unfinished.
-    let mut scores: HashMap<&str, Option<f64>> = HashMap::new();
-    for task in finished {
-        if let Some(task_id) = task.task_id.as_deref() {
-            scores.entry(task_id).or_insert(task.score);
-        }
-    }
+    // taskId -> score. An absent id means the assignment is unfinished.
+    let scores: HashMap<&str, Option<f64>> = finished
+        .iter()
+        .filter_map(|task| Some((task.task_id.as_deref()?, task.score)))
+        .collect();
 
     let mut progress = 0;
     let mut total = 0;
     let mut seen: HashSet<&str> = HashSet::new();
-
-    // Tasks are the authoritative assignment list.
-    for task in &tree.tasks {
-        let Some(task) = task.as_object() else {
-            continue;
-        };
-        let Some(task_id) = task
-            .get("id")
-            .and_then(JsonValue::as_str)
-            .filter(|id| !id.is_empty())
-        else {
-            continue;
-        };
-        if !seen.insert(task_id) {
+    for node in nodes.iter().filter(|node| node.is_task()) {
+        if !seen.insert(node.cid.as_str()) {
             continue;
         }
         total += 1;
 
-        let record = scores.get(task_id);
+        let record = scores.get(node.cid.as_str());
         let status = match record {
             Some(score) => {
                 progress += 1;
@@ -304,155 +394,41 @@ fn chapters_from_tree(
             None => StatusView::Pending,
         };
 
-        let parent_id = task
-            .get("parentId")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("");
-        let Some(top) = top_chapter(parent_id, &parents, &chapter_ids) else {
-            continue;
-        };
-        let Some(&index) = top_index.get(top) else {
-            continue;
-        };
-        let name = page_names
-            .get(task_id)
-            .copied()
-            .filter(|name| !name.is_empty())
-            .or_else(|| chapter_titles.get(parent_id).copied())
-            .filter(|name| !name.is_empty())
-            .unwrap_or("任务");
-        chapters[index].jobs.push(BookJobView {
-            job_id: task_id.to_owned(),
-            name: name.to_owned(),
-            kind: JobKind::Ordinary,
-            status,
-            score: record.copied().flatten(),
-            deadline: None,
-            read_aloud: false,
-        });
-    }
-
-    // Type-2 course books carry no `tasks`: the content pages themselves are
-    // the assignments (`isContent=1`, `paperId`), and the official reader keys
-    // their finished rows on the page id. Only use them when `tasks` is empty,
-    // so navigation pages never become rows in ordinary books.
-    if tree.tasks.is_empty() {
-        for page in &tree.pages {
-            let Some(page) = page.as_object() else {
-                continue;
-            };
-            let Some(page_id) = page
-                .get("id")
-                .and_then(JsonValue::as_str)
-                .filter(|id| !id.is_empty())
-            else {
-                continue;
-            };
-            let is_content = page
-                .get("isContent")
-                .and_then(JsonValue::as_i64)
-                .is_some_and(|value| value != 0)
-                || page
-                    .get("paperId")
-                    .and_then(JsonValue::as_str)
-                    .is_some_and(|id| !id.is_empty());
-            if !is_content || !seen.insert(page_id) {
-                continue;
-            }
-            total += 1;
-
-            let record = scores.get(page_id);
-            let status = match record {
-                Some(score) => {
-                    progress += 1;
-                    StatusView::Finished { score: *score }
-                }
-                None => StatusView::Pending,
-            };
-
-            let parent_id = page
-                .get("parentId")
-                .and_then(JsonValue::as_str)
-                .unwrap_or("");
-            let Some(top) = top_chapter(parent_id, &parents, &chapter_ids) else {
-                continue;
-            };
-            let Some(&index) = top_index.get(top) else {
-                continue;
-            };
-            let name = page
-                .get("name")
-                .and_then(JsonValue::as_str)
-                .filter(|name| !name.is_empty())
-                .or_else(|| chapter_titles.get(parent_id).copied())
-                .filter(|name| !name.is_empty())
-                .unwrap_or("任务");
-            chapters[index].jobs.push(BookJobView {
-                job_id: page_id.to_owned(),
-                name: name.to_owned(),
-                kind: JobKind::Ordinary,
-                status,
-                score: record.copied().flatten(),
-                deadline: None,
-                read_aloud: name.contains("跟读") || name.contains("朗读"),
-            });
-        }
-    }
-
-    // Some older payloads only put the task id on the page.
-    for page in &tree.pages {
-        let Some(page) = page.as_object() else {
-            continue;
-        };
-        let Some(task_id) = page
-            .get("taskId")
-            .and_then(JsonValue::as_str)
-            .filter(|id| !id.is_empty())
+        let Some(top) = top_chapter(node.pid.as_deref().unwrap_or(""), &parents, &chapter_ids)
         else {
             continue;
         };
-        if !seen.insert(task_id) {
-            continue;
-        }
-        total += 1;
-
-        let record = scores.get(task_id);
-        let status = match record {
-            Some(score) => {
-                progress += 1;
-                StatusView::Finished { score: *score }
-            }
-            None => StatusView::Pending,
-        };
-
-        let parent_id = page
-            .get("parentId")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("");
-        let Some(top) = top_chapter(parent_id, &parents, &chapter_ids) else {
-            continue;
-        };
         let Some(&index) = top_index.get(top) else {
             continue;
         };
-        let name = page
-            .get("name")
-            .and_then(JsonValue::as_str)
-            .filter(|name| !name.is_empty())
-            .or_else(|| chapter_titles.get(parent_id).copied())
-            .unwrap_or("任务");
         chapters[index].jobs.push(BookJobView {
-            job_id: task_id.to_owned(),
-            name: name.to_owned(),
-            kind: JobKind::Ordinary,
+            job_id: node.cid.clone(),
+            name: if node.node_name.is_empty() {
+                "任务".to_owned()
+            } else {
+                node.node_name.clone()
+            },
+            kind: if node.is_word_task() {
+                JobKind::WordPk
+            } else {
+                JobKind::Ordinary
+            },
             status,
             score: record.copied().flatten(),
             deadline: None,
-            read_aloud: false,
+            read_aloud: is_read_aloud_name(&node.node_name),
         });
     }
 
     (chapters, progress, total)
+}
+
+/// Book tasks name their recordings rather than carrying an open-type marker,
+/// so the title is the same kind of hint the job list uses.
+fn is_read_aloud_name(name: &str) -> bool {
+    ["跟读", "朗读", "听读", "背诵"]
+        .iter()
+        .any(|needle| name.contains(needle))
 }
 
 /// Walk parent links until a chapter whose parent is not itself a chapter.
@@ -474,153 +450,65 @@ fn top_chapter<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{json, Value as JsonValue};
 
-    fn tree(value: JsonValue) -> BookTree {
-        BookTree::from_value(value).unwrap()
+    fn node(value: JsonValue) -> BookTaskNode {
+        serde_json::from_value(value).unwrap()
     }
 
     fn finished(rows: JsonValue) -> Vec<FinishedTask> {
         serde_json::from_value(rows).unwrap()
     }
 
-    /// Two levels below the root, one page without a task, one empty chapter
-    /// and a finished task that belongs to no page.
-    fn sample_tree() -> BookTree {
-        tree(json!({
-            "chapters": [
-                { "id": "T1", "parentId": "", "name": "Unit 1", "type": 1 },
-                { "id": "T1a", "parentId": "T1", "name": "Lesson 1", "type": 1 },
-                { "id": "T1b", "parentId": "T1a", "name": "Part A", "type": 1 },
-                { "id": "T2", "parentId": "", "name": "Unit 2", "type": 1 },
-                { "id": "T3", "parentId": "", "name": "Unit 3", "type": 1 }
-            ],
-            "pages": [
-                { "id": "P1", "parentId": "T1b", "name": "Page 1", "taskId": "TK1", "type": 2 },
-                { "id": "P2", "parentId": "T1a", "name": "Page 2", "taskId": "TK2", "type": 2 },
-                { "id": "P3", "parentId": "T1", "name": "Page 3", "type": 2 },
-                { "id": "P4", "parentId": "T2", "name": "Page 4", "taskId": "TK3", "type": 2 }
-            ]
-        }))
+    /// Two chapters, one nested chapter, a recording task, a vocabulary task
+    /// and a layout node that is not an assignment.
+    fn sample_nodes() -> Vec<BookTaskNode> {
+        vec![
+            node(json!({ "cid": "T1", "pid": "0", "nodeName": "Unit 1", "nodeType": 1 })),
+            node(json!({ "cid": "T1a", "pid": "T1", "nodeName": "Lesson 1", "nodeType": 1 })),
+            node(json!({ "cid": "T2", "pid": "0", "nodeName": "Unit 2", "nodeType": 1 })),
+            node(json!({ "cid": "T3", "pid": "0", "nodeName": "Unit 3", "nodeType": 1 })),
+            node(
+                json!({ "cid": "TK1", "pid": "T1a", "nodeName": "课文跟读", "nodeType": 2, "taskType": 1 }),
+            ),
+            node(
+                json!({ "cid": "TK2", "pid": "T2", "nodeName": "Task1", "nodeType": 2, "taskType": 2 }),
+            ),
+            node(json!({ "cid": "CAP", "pid": "", "nodeName": "caption", "nodeType": 0 })),
+        ]
     }
 
     #[test]
-    fn top_chapters_collect_pages_from_every_level_below_them() {
-        let (chapters, _, _) = chapters_from_tree(&sample_tree(), &[]);
+    fn assignments_are_grouped_under_their_top_chapter_and_classified() {
+        let finished = finished(json!([{ "taskId": "TK1", "score": 88.5 }]));
+        let (chapters, progress, total) = chapters_from_nodes(&sample_nodes(), &finished);
 
-        let titles: Vec<_> = chapters
-            .iter()
-            .map(|chapter| chapter.title.as_str())
-            .collect();
+        assert_eq!((progress, total), (1, 2));
+        let titles: Vec<_> = chapters.iter().map(|c| c.title.as_str()).collect();
         assert_eq!(titles, vec!["Unit 1", "Unit 2", "Unit 3"]);
 
-        let names = |index: usize| -> Vec<_> {
-            chapters[index]
-                .jobs
-                .iter()
-                .map(|job| job.name.as_str())
-                .collect()
-        };
-        // Array order, and both the child and the grandchild page land here.
-        assert_eq!(names(0), vec!["Page 1", "Page 2"]);
-        assert_eq!(names(1), vec!["Page 4"]);
-        // A chapter without pages stays visible with an empty job list.
+        let recording = &chapters[0].jobs[0];
+        assert_eq!(recording.job_id, "TK1");
+        assert_eq!(recording.kind, JobKind::Ordinary);
+        assert!(recording.read_aloud);
+        assert_eq!(recording.status, StatusView::Finished { score: Some(88.5) });
+        assert_eq!(recording.score, Some(88.5));
+
+        let vocabulary = &chapters[1].jobs[0];
+        assert_eq!(vocabulary.job_id, "TK2");
+        assert_eq!(vocabulary.kind, JobKind::WordPk);
+        assert!(!vocabulary.read_aloud);
+        assert_eq!(vocabulary.status, StatusView::Pending);
+
+        // A chapter with no assignments stays visible.
         assert!(chapters[2].jobs.is_empty());
     }
 
     #[test]
-    fn finished_tasks_map_to_pages_and_drive_progress() {
-        let finished = finished(json!([
-            { "taskId": "TK1", "score": 88.5 },
-            { "taskId": "TK9", "score": 100.0 }
-        ]));
-        let (chapters, progress, total) = chapters_from_tree(&sample_tree(), &finished);
-
-        // P3 has no taskId and TK9 has no page: neither counts.
-        assert_eq!((progress, total), (1, 3));
-
-        let page_one = &chapters[0].jobs[0];
-        assert_eq!(page_one.job_id, "TK1");
-        assert_eq!(page_one.status, StatusView::Finished { score: Some(88.5) });
-        assert_eq!(page_one.score, Some(88.5));
-        assert_eq!(page_one.kind, JobKind::Ordinary);
-        assert_eq!(page_one.deadline, None);
-        assert!(!page_one.read_aloud);
-
-        let page_two = &chapters[0].jobs[1];
-        assert_eq!(page_two.status, StatusView::Pending);
-        assert_eq!(page_two.score, None);
-    }
-
-    #[test]
-    fn an_empty_tree_decodes_to_empty_chapters() {
-        let (chapters, progress, total) = chapters_from_tree(&tree(json!({})), &[]);
+    fn an_empty_list_has_no_chapters() {
+        let (chapters, progress, total) = chapters_from_nodes(&[], &[]);
         assert!(chapters.is_empty());
         assert_eq!((progress, total), (0, 0));
-    }
-
-    #[test]
-    fn tasks_without_a_page_are_still_listed() {
-        // The large reader books put most assignments in `tasks`; only a few
-        // have a page that links to them.
-        let tree = tree(json!({
-            "chapters": [
-                { "id": "T1", "parentId": "", "name": "Unit 1", "type": 1 },
-                { "id": "T1a", "parentId": "T1", "name": "测验", "type": 1 }
-            ],
-            "pages": [
-                { "id": "P1", "parentId": "T1", "name": "阅读", "taskId": "TK1", "type": 2 }
-            ],
-            "tasks": [
-                { "id": "TK1", "parentId": "T1", "type": 3, "taskType": "1" },
-                { "id": "TK2", "parentId": "T1a", "type": 3, "taskType": "1" }
-            ]
-        }));
-        let finished = finished(json!([{ "taskId": "TK2", "score": 100.0 }]));
-
-        let (chapters, progress, total) = chapters_from_tree(&tree, &finished);
-
-        assert_eq!((progress, total), (1, 2));
-        let jobs = &chapters[0].jobs;
-        assert_eq!(jobs.len(), 2);
-        assert_eq!(jobs[0].job_id, "TK1");
-        assert_eq!(jobs[0].name, "阅读");
-        assert_eq!(jobs[0].status, StatusView::Pending);
-        assert_eq!(jobs[1].job_id, "TK2");
-        assert_eq!(jobs[1].name, "测验");
-        assert_eq!(jobs[1].status, StatusView::Finished { score: Some(100.0) });
-    }
-
-    #[test]
-    fn content_pages_are_the_jobs_of_a_course_book_without_tasks() {
-        // Type-2 books have chapters and content pages but no `tasks`; the
-        // page id is what the reader uses, and finished rows key on it.
-        let tree = tree(json!({
-            "chapters": [
-                { "id": "L1", "parentId": "", "name": "Lesson 1", "type": 1 },
-                { "id": "L2", "parentId": "", "name": "Lesson 2", "type": 1 }
-            ],
-            "pages": [
-                { "id": "P1", "parentId": "L1", "name": "课文跟读", "isContent": 1, "paperId": "PAPER-1" },
-                { "id": "P2", "parentId": "L1", "name": "课文详解" },
-                { "id": "P3", "parentId": "L2", "name": "课文跟读", "paperId": "PAPER-3" }
-            ]
-        }));
-        let finished = finished(json!([{ "taskId": "P1", "score": 88.0 }]));
-
-        let (chapters, progress, total) = chapters_from_tree(&tree, &finished);
-
-        assert_eq!((progress, total), (1, 2));
-        assert_eq!(chapters.len(), 2);
-        assert_eq!(chapters[0].jobs[0].job_id, "P1");
-        assert_eq!(chapters[0].jobs[0].name, "课文跟读");
-        assert!(chapters[0].jobs[0].read_aloud);
-        assert_eq!(
-            chapters[0].jobs[0].status,
-            StatusView::Finished { score: Some(88.0) }
-        );
-        assert_eq!(chapters[1].jobs[0].job_id, "P3");
-        assert_eq!(chapters[1].jobs[0].status, StatusView::Pending);
     }
 
     fn book(value: JsonValue) -> Book {

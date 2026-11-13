@@ -2,14 +2,14 @@ import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/commands";
-import type { BookChapter } from "../api/types";
+import type { BookChapter, BookJob } from "../api/types";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/LoadingState";
 import { ArrowLeftIcon } from "../components/Icons";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAccount } from "../hooks/account";
-import { formatDateTime, isOverdue, percent } from "../utils";
+import { bookTaskPath, formatDateTime, isOverdue, percent } from "../utils";
 
 /** Rows rendered per chapter before the "show more" button appears. */
 const CHAPTER_PAGE_SIZE = 100;
@@ -96,7 +96,13 @@ export function BookDetail() {
             />
           ) : (
             detail.data.chapters.map((chapter) => (
-              <ChapterSection key={chapter.chapter_id} chapter={chapter} />
+              <ChapterSection
+                key={chapter.chapter_id}
+                chapter={chapter}
+                bookId={detail.data.book_id}
+                bookType={bookType}
+                courseId={detail.data.course_id}
+              />
             ))
           )}
         </>
@@ -105,11 +111,28 @@ export function BookDetail() {
   );
 }
 
+/** The same three cases the job list uses: word PK, read-aloud, ordinary. */
+function bookKindLabel(job: BookJob): string | null {
+  if (job.kind === "word_pk") return "单词 PK";
+  if (job.read_aloud) return "含朗读";
+  return null;
+}
+
 /**
- * One top-level chapter. Rows are not links: a book page's task id is not a
- * job id, so the answer route would fail to find it in the job cache.
+ * One top-level chapter. A book task id is not a job id, so each row opens the
+ * read-only book-task view instead of the job routes.
  */
-function ChapterSection({ chapter }: { chapter: BookChapter }) {
+function ChapterSection({
+  chapter,
+  bookId,
+  bookType,
+  courseId,
+}: {
+  chapter: BookChapter;
+  bookId: string;
+  bookType: number;
+  courseId: string;
+}) {
   const [limit, setLimit] = useState(CHAPTER_PAGE_SIZE);
   const jobs = chapter.jobs ?? [];
   const visible = jobs.slice(0, limit);
@@ -130,11 +153,16 @@ function ChapterSection({ chapter }: { chapter: BookChapter }) {
           {visible.map((job) => {
             const overdue =
               job.status.kind !== "finished" && isOverdue(job.deadline);
+            const label = bookKindLabel(job);
             return (
-              <div key={job.job_id} className="job-row job-row--book">
+              <Link
+                key={job.job_id}
+                to={bookTaskPath(bookId, bookType, courseId, job)}
+                className="job-row job-row--book"
+              >
                 <span className="job-name">
                   <span className="job-name-main">{job.name}</span>
-                  {job.read_aloud && <span className="job-sub">含朗读</span>}
+                  {label && <span className="job-sub">{label}</span>}
                 </span>
                 <StatusBadge kind={job.status.kind} />
                 <span className="job-score">
@@ -145,7 +173,7 @@ function ChapterSection({ chapter }: { chapter: BookChapter }) {
                 >
                   {formatDateTime(job.deadline)}
                 </span>
-              </div>
+              </Link>
             );
           })}
           {jobs.length > limit && (

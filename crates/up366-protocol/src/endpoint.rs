@@ -155,16 +155,32 @@ pub const ENDPOINTS: &[Endpoint] = &[
         BodyKind::Form,
     ),
     ep(
-        "book_tree",
-        BOOK_API,
-        "/client/books/tree",
+        "book_plan",
+        STUDYTASK_API,
+        "/client/book/plan",
+        false,
+        BodyKind::Form,
+    ),
+    // The official book detail view: chapters and assignments with the
+    // student's scores, and the per-task detail behind each row.
+    ep(
+        "book_task_nodes",
+        DSB_API,
+        "/client/student/chapter-task-score/list",
         false,
         BodyKind::Form,
     ),
     ep(
-        "book_plan",
-        STUDYTASK_API,
-        "/client/book/plan",
+        "book_task_questions",
+        DSB_API,
+        "/client/question/student/task/question-score/list",
+        false,
+        BodyKind::Form,
+    ),
+    ep(
+        "book_task_words",
+        DSB_API,
+        "/client/word/task/student/word-skill-get/list",
         false,
         BodyKind::Form,
     ),

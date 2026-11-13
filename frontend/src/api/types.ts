@@ -89,13 +89,51 @@ export interface BookChapter {
   jobs: BookJob[];
 }
 
-export interface BookDetail extends Book {
-  /** Pages whose task appears in the finished-task list. */
+export interface BookDetail {
+  book_id: string;
+  name: string;
+  subject: string;
+  cover_url: string | null;
+  is_2025_reader: boolean;
+  /** The course the assignment list was read in. */
+  course_id: string;
+  /** Assignments whose task appears in the finished-task list. */
   progress: number;
-  /** Pages that carry a task id. */
+  /** Assignments the reader lists. */
   total: number;
   teacher_name: string | null;
   chapters: BookChapter[];
+}
+
+/** One question row of a book assignment (read-only). */
+export interface BookTaskQuestion {
+  question_id: string;
+  number: string;
+  type_name: string;
+  knowledge: string;
+  /** A recording URL for read-aloud questions, an answer string otherwise. */
+  my_answer: string;
+  correct_answer: string;
+  max_score: number | null;
+  score: number | null;
+  class_average: number | null;
+  score_rate: number | null;
+  read_aloud: boolean;
+}
+
+/** One vocabulary row of a book assignment. */
+export interface BookWord {
+  word: string;
+  mastered: boolean;
+}
+
+/** Read-only detail of one book assignment. */
+export interface BookTaskDetail {
+  task_id: string;
+  kind: JobKind;
+  read_aloud: boolean;
+  questions: BookTaskQuestion[];
+  words: BookWord[];
 }
 
 export type AnswerStatus = "right" | "wrong" | "partial" | "unanswered";
@@ -311,6 +349,16 @@ export interface CommandMap {
       course_id: string | null;
     };
     result: BookDetail;
+  };
+  book_task_get: {
+    args: {
+      account_id: string;
+      book_id: string;
+      course_id: string | null;
+      task_id: string;
+      word_task: boolean;
+    };
+    result: BookTaskDetail;
   };
 
   answer_get: {

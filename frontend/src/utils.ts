@@ -1,4 +1,4 @@
-import type { JobKind } from "./api/types";
+import type { BookJob, JobKind } from "./api/types";
 import { isApiError } from "./api/invoke";
 
 export function errorMessage(error: unknown): string {
@@ -45,6 +45,22 @@ export function jobPath(job: {
   if (job.kind === "word_pk") return `/jobs/${job.job_id}/wordpk`;
   if (job.read_aloud) return `/jobs/${job.job_id}/readaloud`;
   return `/jobs/${job.job_id}/answer`;
+}
+
+/** Route for a book assignment; the book view resolves its own ids. */
+export function bookTaskPath(
+  bookId: string,
+  bookType: number,
+  courseId: string,
+  job: BookJob,
+): string {
+  const params = new URLSearchParams({
+    type: String(bookType),
+    course: courseId,
+    kind: job.kind,
+    name: job.name,
+  });
+  return `/books/${bookId}/tasks/${job.job_id}?${params.toString()}`;
 }
 
 /** Read a selected mp3 as base64 for the upload command. */

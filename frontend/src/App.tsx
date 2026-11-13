@@ -4,6 +4,7 @@ import { ErrorState } from "./components/ErrorState";
 import { useAccounts } from "./hooks/account";
 import { AnswerView } from "./pages/AnswerView";
 import { BookDetail } from "./pages/BookDetail";
+import { BookTask } from "./pages/BookTask";
 import { Books } from "./pages/Books";
 import { Jobs } from "./pages/Jobs";
 import { Login } from "./pages/Login";
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="jobs/:jobId/readaloud" element={<ReadAloud />} />
           <Route path="books" element={<Books />} />
           <Route path="books/:bookId" element={<BookDetail />} />
+          <Route path="books/:bookId/tasks/:taskId" element={<BookTask />} />
           <Route path="wrong-notes" element={<WrongNote />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/jobs" replace />} />

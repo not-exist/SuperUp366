@@ -495,6 +495,115 @@ pub struct FinishedTask {
     pub raw: Value,
 }
 
+/// One node from `/client/student/chapter-task-score/list`.
+///
+/// The endpoint returns the book's chapters (`nodeType = 1`) and assignments
+/// (`nodeType = 2`) as one flat array. `cid` is the same id the reader uses:
+/// a task's `id` for an ordinary book, a content page's `id` for a type-2
+/// course book. `taskType = 2` marks a vocabulary task; everything else is an
+/// ordinary paper.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookTaskNode {
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub cid: String,
+    #[serde(default, deserialize_with = "flex::opt_string")]
+    pub pid: Option<String>,
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub node_name: String,
+    #[serde(default, deserialize_with = "flex::opt_i64")]
+    pub node_type: Option<i64>,
+    /// `1` = ordinary paper, `2` = vocabulary (word-skill) assignment.
+    #[serde(default, deserialize_with = "flex::opt_i64")]
+    pub task_type: Option<i64>,
+    #[serde(default, deserialize_with = "flex::opt_f64")]
+    pub task_score: Option<f64>,
+    #[serde(default, deserialize_with = "flex::opt_f64")]
+    pub score: Option<f64>,
+    #[serde(default, deserialize_with = "flex::opt_f64")]
+    pub percent: Option<f64>,
+    #[serde(default, deserialize_with = "flex::opt_i64")]
+    pub seconds: Option<i64>,
+    #[serde(default)]
+    pub raw: Value,
+}
+
+impl BookTaskNode {
+    pub fn is_chapter(&self) -> bool {
+        self.node_type == Some(1) && !self.cid.is_empty()
+    }
+
+    pub fn is_task(&self) -> bool {
+        self.node_type == Some(2) && !self.cid.is_empty()
+    }
+
+    /// A vocabulary assignment, which the UI presents like a word-PK task.
+    pub fn is_word_task(&self) -> bool {
+        self.task_type == Some(2)
+    }
+}
+
+/// One question row from `/client/question/student/task/question-score/list`.
+///
+/// This is the read-only detail the book reader shows for a finished or
+/// unfinished task. Read-aloud questions (`questionTypeNum` 9/12/13) carry
+/// the student's recording URL in `myAnswer`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookQuestionRow {
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub question_id: String,
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub question_no: String,
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub qst_type_name: String,
+    #[serde(default, deserialize_with = "flex::opt_i64")]
+    pub question_type_num: Option<i64>,
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub knowledge: String,
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub my_answer: String,
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub correct_answer: String,
+    #[serde(default, deserialize_with = "flex::opt_f64")]
+    pub question_score: Option<f64>,
+    #[serde(default, deserialize_with = "flex::opt_f64")]
+    pub score: Option<f64>,
+    #[serde(default, deserialize_with = "flex::opt_f64")]
+    pub avg_score: Option<f64>,
+    #[serde(default, deserialize_with = "flex::opt_f64")]
+    pub score_rate: Option<f64>,
+    #[serde(default)]
+    pub raw: Value,
+}
+
+impl BookQuestionRow {
+    /// The question types the reader renders as recordings.
+    pub fn is_read_aloud(&self) -> bool {
+        matches!(self.question_type_num, Some(9 | 12 | 13))
+    }
+}
+
+/// One row from `/client/word/task/student/word-skill-get/list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookWordRow {
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub word: String,
+    #[serde(default, deserialize_with = "flex::opt_bool")]
+    pub pass: Option<bool>,
+    #[serde(default, deserialize_with = "flex::opt_i64")]
+    pub degree: Option<i64>,
+    #[serde(default)]
+    pub raw: Value,
+}
+
+impl BookWordRow {
+    pub fn mastered(&self) -> bool {
+        self.pass == Some(true)
+    }
+}
+
 /// A bookshelf entry, also used for `book_info`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -517,9 +626,8 @@ pub struct Book {
     pub goods_vertical_img: Option<String>,
     #[serde(default, deserialize_with = "flex::opt_string")]
     pub vertical_cover: Option<String>,
-    /// 1 = purchased/reader book, 2 = course-assigned book. `book_info` and
-    /// `books/tree` need the real value; a type-2 book asked for as type 1
-    /// answers `data: null`.
+    /// 1 = purchased/reader book, 2 = course-assigned book. `book_info` needs
+    /// the real value; a type-2 book asked for as type 1 answers `data: null`.
     #[serde(default, deserialize_with = "flex::opt_i64")]
     pub book_type: Option<i64>,
     #[serde(default, deserialize_with = "flex::opt_i64")]
@@ -585,97 +693,6 @@ impl Book {
     /// 1, so the shelf value has to be reused instead of hardcoding it.
     pub fn book_type(&self) -> i64 {
         self.book_type.unwrap_or(1)
-    }
-}
-
-/// One chapter node from `data.chapters[]`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BookChapter {
-    #[serde(default, deserialize_with = "flex::opt_string")]
-    pub id: Option<String>,
-    #[serde(default, deserialize_with = "flex::opt_string")]
-    pub chapter_id: Option<String>,
-    #[serde(default, deserialize_with = "flex::opt_string")]
-    pub parent_id: Option<String>,
-    #[serde(default, deserialize_with = "flex::opt_string")]
-    pub name: Option<String>,
-    #[serde(default, deserialize_with = "flex::opt_string")]
-    pub chapter_name: Option<String>,
-    #[serde(default, rename = "type", deserialize_with = "flex::opt_i64")]
-    pub kind: Option<i64>,
-    #[serde(default, deserialize_with = "flex::opt_bool")]
-    pub is_close: Option<bool>,
-    #[serde(default)]
-    pub resource_list: Option<Value>,
-    #[serde(default)]
-    pub raw: Value,
-}
-
-impl BookChapter {
-    pub fn id(&self) -> Option<&str> {
-        self.id.as_deref().or(self.chapter_id.as_deref())
-    }
-
-    pub fn title(&self) -> &str {
-        self.name
-            .as_deref()
-            .or(self.chapter_name.as_deref())
-            .unwrap_or("")
-    }
-
-    pub fn dir_chapters(&self) -> Option<&[Value]> {
-        self.resource_list
-            .as_ref()?
-            .get("dirChapters")?
-            .as_array()
-            .map(Vec::as_slice)
-    }
-}
-
-/// `data` from `/client/books/tree`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BookTree {
-    #[serde(default, deserialize_with = "flex::opt_string")]
-    pub version: Option<String>,
-    #[serde(default)]
-    pub chapters: Vec<BookChapter>,
-    #[serde(default)]
-    pub pages: Vec<Value>,
-    #[serde(default)]
-    pub tasks: Vec<Value>,
-    #[serde(default)]
-    pub book: Option<Value>,
-    #[serde(default)]
-    pub raw: Value,
-}
-
-impl BookTree {
-    /// Decode a tree and give every chapter its own raw object.
-    pub fn from_value(value: Value) -> Result<Self> {
-        let mut tree: BookTree = decode(value, "book_tree")?;
-        if let Some(raw_chapters) = tree.raw.get("chapters").and_then(Value::as_array) {
-            for (chapter, raw) in tree.chapters.iter_mut().zip(raw_chapters) {
-                chapter.set_raw(raw.clone());
-            }
-        }
-        Ok(tree)
-    }
-
-    pub fn chapter(&self, id: &str) -> Option<&BookChapter> {
-        self.chapters
-            .iter()
-            .find(|chapter| chapter.id() == Some(id))
-    }
-
-    /// `data.book.configs.customFlag == 1`.
-    pub fn has_custom_chapters(&self) -> bool {
-        self.book
-            .as_ref()
-            .and_then(|book| book.get("configs"))
-            .and_then(|configs| configs.get("customFlag"))
-            .is_some_and(|flag| flag.as_i64() == Some(1) || flag.as_str() == Some("1"))
     }
 }
 
@@ -978,9 +995,10 @@ impl_raw!(
     JobInfo,
     FinishedJob,
     FinishedTask,
+    BookTaskNode,
+    BookQuestionRow,
+    BookWordRow,
     Book,
-    BookChapter,
-    BookTree,
     BookPlanEntry,
     AnswerDetail,
     PaperDetail,
@@ -1102,20 +1120,5 @@ mod tests {
                 .unwrap(),
         );
         assert!(!last.has_next());
-    }
-
-    #[test]
-    fn book_tree_keeps_chapter_raw_and_custom_flag() {
-        let tree = BookTree::from_value(json!({
-            "version": "v1",
-            "book": { "configs": { "customFlag": 1 } },
-            "chapters": [{ "id": "C-1", "name": "Chapter" }],
-            "pages": [],
-            "tasks": []
-        }))
-        .unwrap();
-        assert!(tree.has_custom_chapters());
-        assert_eq!(tree.chapter("C-1").unwrap().title(), "Chapter");
-        assert_eq!(tree.chapters[0].raw["id"], json!("C-1"));
     }
 }

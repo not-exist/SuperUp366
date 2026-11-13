@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::adapters::{decode_items, endpoint};
 use crate::client::Client;
 use crate::codec;
-use crate::dto::{self, Book, BookPlanEntry, BookTree};
+use crate::dto::{self, Book, BookPlanEntry, BookQuestionRow, BookTaskNode, BookWordRow};
 use crate::error::Result;
 
 /// `data` array from `/client/books/buy-book` (no request body).
@@ -22,8 +22,7 @@ pub async fn books(client: &Client) -> Result<Vec<Book>> {
 /// `/client/books/buy-book` only returns purchased goods. Course books such as
 /// 新概念英语 are assigned by the class and only appear in `data[].books` of
 /// `/client/student/course/list`, so the shelf has to read both lists. The
-/// course id is kept because `books/tree` only returns some assigned books
-/// when the request carries it.
+/// course id is kept because the book detail endpoint requires one.
 pub async fn course_books(client: &Client) -> Result<Vec<(String, Book)>> {
     let endpoint = endpoint("course_books")?;
     let data = client.call(endpoint, &[]).await?;
@@ -63,28 +62,78 @@ pub async fn book_info(client: &Client, book_id: &str, book_type: i64) -> Result
     dto::decode(codec::require_data(data, endpoint.name)?, endpoint.name)
 }
 
-/// `data` tree from `/client/books/tree`. `version=""` forces a fresh tree.
+/// Chapters and assignments from `/client/student/chapter-task-score/list`.
 ///
-/// `course_id` is needed for some class-assigned books: 新概念英语1 answers an
-/// empty tree unless the request carries the assigning course. It is optional
-/// because sending an unrelated course can make other books answer empty.
-pub async fn book_tree(
+/// This is the endpoint the official book view uses. A flat array of chapter
+/// (`nodeType = 1`) and task (`nodeType = 2`) nodes; `cid` is the task id that
+/// `finished-task/list` keys on.
+pub async fn book_task_nodes(
     client: &Client,
+    course_id: &str,
     book_id: &str,
-    book_type: i64,
-    course_id: Option<&str>,
-) -> Result<BookTree> {
-    let endpoint = endpoint("book_tree")?;
-    let mut params = vec![
-        ("bookId", json!(book_id)),
-        ("version", json!("")),
-        ("bookType", json!(book_type)),
-    ];
-    if let Some(course_id) = course_id {
-        params.push(("courseId", json!(course_id)));
-    }
-    let data = client.call(endpoint, &params).await?;
-    BookTree::from_value(codec::require_data(data, endpoint.name)?)
+    uid: &str,
+) -> Result<Vec<BookTaskNode>> {
+    let endpoint = endpoint("book_task_nodes")?;
+    let data = client
+        .call(
+            endpoint,
+            &[
+                ("courseId", json!(course_id)),
+                ("bookId", json!(book_id)),
+                ("uid", json!(uid)),
+            ],
+        )
+        .await?;
+    let items = codec::into_array(data, endpoint.name)?;
+    decode_items(items, endpoint.name)
+}
+
+/// Question rows for one book task.
+pub async fn book_task_questions(
+    client: &Client,
+    course_id: &str,
+    book_id: &str,
+    task_id: &str,
+    uid: &str,
+) -> Result<Vec<BookQuestionRow>> {
+    let endpoint = endpoint("book_task_questions")?;
+    let data = client
+        .call(
+            endpoint,
+            &[
+                ("courseId", json!(course_id)),
+                ("bookId", json!(book_id)),
+                ("taskId", json!(task_id)),
+                ("uid", json!(uid)),
+            ],
+        )
+        .await?;
+    let items = codec::into_array(data, endpoint.name)?;
+    decode_items(items, endpoint.name)
+}
+
+/// Words for one vocabulary book task.
+pub async fn book_task_words(
+    client: &Client,
+    course_id: &str,
+    book_id: &str,
+    task_id: &str,
+    uid: &str,
+) -> Result<Vec<BookWordRow>> {
+    let endpoint = endpoint("book_task_words")?;
+    let data = client
+        .call(
+            endpoint,
+            &[
+                ("courseId", json!(course_id)),
+                ("bookId", json!(book_id)),
+                ("taskId", json!(task_id)),
+                ("uid", json!(uid)),
+            ],
+        )
+        .await?;
+    let items = codec::into_array(data, endpoint.name)?;
+    decode_items(items, endpoint.name)
 }
 
 /// `data` array from `/client/book/plan`.
@@ -209,33 +258,60 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn book_tree_decodes_version_and_chapters() {
+    async fn book_task_nodes_use_the_course_book_and_uid() {
         let server = MockServer::start();
         let mock = server.mock(|when, then| {
             when.method(POST)
-                .path("/client/books/tree")
+                .path("/client/student/chapter-task-score/list")
+                .body_contains("courseId=COURSE-9")
                 .body_contains("bookId=BOOK-1")
-                .body_contains("version=")
-                .body_contains("bookType=2")
-                .body_contains("courseId=COURSE-9");
-            then.status(200).json_body(ok(json!({
-                "version": "v42",
-                "book": { "configs": { "customFlag": 1 } },
-                "chapters": [{ "id": "C-1", "name": "Unit 1", "type": 2 }],
-                "pages": [],
-                "tasks": []
-            })));
+                .body_contains("uid=42");
+            then.status(200).json_body(ok(json!([
+                { "cid": "C-1", "pid": "0", "nodeName": "Unit 1", "nodeType": 1 },
+                { "cid": "T-1", "pid": "C-1", "nodeName": "课文跟读", "nodeType": 2, "taskType": 1 },
+                { "cid": "T-2", "pid": "C-1", "nodeName": "Task1", "nodeType": 2, "taskType": 2 }
+            ])));
         });
 
         let client = client(&server);
-        let tree = book_tree(&client, "BOOK-1", 2, Some("COURSE-9"))
+        let nodes = book_task_nodes(&client, "COURSE-9", "BOOK-1", "42")
             .await
             .unwrap();
 
-        assert_eq!(tree.version.as_deref(), Some("v42"));
-        assert!(tree.has_custom_chapters());
-        assert_eq!(tree.chapter("C-1").unwrap().title(), "Unit 1");
-        assert_eq!(tree.chapter("C-1").unwrap().kind, Some(2));
+        assert_eq!(nodes.len(), 3);
+        assert!(nodes[0].is_chapter());
+        assert_eq!(nodes[0].node_name, "Unit 1");
+        assert!(nodes[1].is_task());
+        assert!(!nodes[1].is_word_task());
+        assert!(nodes[2].is_word_task());
+        mock.assert_hits(1);
+    }
+
+    #[tokio::test]
+    async fn book_task_questions_flag_recordings() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/client/question/student/task/question-score/list")
+                .body_contains("taskId=T-1")
+                .body_contains("uid=42");
+            then.status(200).json_body(ok(json!([
+                { "questionId": "Q-1", "questionNo": "1", "qstTypeName": "口语跟读",
+                  "questionTypeNum": 9, "myAnswer": "https://cdn/a.mp3" },
+                { "questionId": "Q-2", "questionNo": "2", "qstTypeName": "单选题",
+                  "questionTypeNum": 1, "myAnswer": "A" }
+            ])));
+        });
+
+        let client = client(&server);
+        let rows = book_task_questions(&client, "COURSE-9", "BOOK-1", "T-1", "42")
+            .await
+            .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert!(rows[0].is_read_aloud());
+        assert_eq!(rows[0].my_answer, "https://cdn/a.mp3");
+        assert!(!rows[1].is_read_aloud());
         mock.assert_hits(1);
     }
 

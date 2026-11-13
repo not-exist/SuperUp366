@@ -12,6 +12,7 @@ import type {
   Book,
   BookDetail,
   BookJob,
+  BookTaskDetail,
   CommandMap,
   CorrectionDraw,
   CorrectionOverview,
@@ -238,7 +239,12 @@ const books: BookDetail[] = bookSeeds.map((book, bookIndex) => {
   }));
   const jobs = chapters.flatMap((chapter) => chapter.jobs);
   return {
-    ...book,
+    book_id: book.book_id,
+    name: book.name,
+    subject: book.subject,
+    cover_url: book.cover_url,
+    is_2025_reader: book.is_2025_reader,
+    course_id: courseSeeds[bookIndex % courseSeeds.length].course_id,
     progress: jobs.filter((job) => job.status.kind === "finished").length,
     total: jobs.length,
     teacher_name: courseSeeds[bookIndex % courseSeeds.length].teacher_name,
@@ -503,7 +509,9 @@ export async function handleMock(
         subject: book.subject,
         cover_url: book.cover_url,
         is_2025_reader: book.is_2025_reader,
-        book_type: book.book_type,
+        book_type:
+          bookSeeds.find((seed) => seed.book_id === book.book_id)?.book_type ??
+          1,
         course_id: book.course_id,
       }));
     }
@@ -516,6 +524,52 @@ export async function handleMock(
         throw { code: "not_found", message: "书籍不存在", retryable: false };
       }
       return book;
+    }
+
+    case "book_task_get": {
+      const { task_id, word_task, book_id } =
+        args as CommandMap["book_task_get"]["args"];
+      await latency();
+      const job = books
+        .find((book) => book.book_id === book_id)
+        ?.chapters.flatMap((chapter) => chapter.jobs)
+        .find((item) => item.job_id === task_id);
+      if (!job) {
+        throw { code: "not_found", message: "任务不存在", retryable: false };
+      }
+      if (word_task) {
+        const result: BookTaskDetail = {
+          task_id,
+          kind: "word_pk",
+          read_aloud: false,
+          questions: [],
+          words: ["apple", "bridge", "culture", "journey"].map((word, index) => ({
+            word,
+            mastered: index % 2 === 0,
+          })),
+        };
+        return result;
+      }
+      const result: BookTaskDetail = {
+        task_id,
+        kind: "ordinary",
+        read_aloud: job.read_aloud,
+        words: [],
+        questions: Array.from({ length: 4 }, (_, index) => ({
+          question_id: `${task_id}-q${index + 1}`,
+          number: String(index + 1),
+          type_name: job.read_aloud ? "口语跟读" : "单选题",
+          knowledge: job.name,
+          my_answer: job.read_aloud ? "https://example.com/recording.mp3" : "A",
+          correct_answer: job.read_aloud ? "" : "A",
+          max_score: 10,
+          score: job.read_aloud ? 8.5 : 10,
+          class_average: 7.9,
+          score_rate: 0.79,
+          read_aloud: job.read_aloud,
+        })),
+      };
+      return result;
     }
 
     case "answer_get": {
