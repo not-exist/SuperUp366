@@ -194,16 +194,8 @@ fn questions_from_paper(xml: &str) -> Vec<PartialQuestion> {
                 }
                 collecting = Collecting::Nothing;
             }
-            Event::Text(text) => {
-                if collecting != Collecting::Nothing {
-                    buffer.push_str(&text);
-                }
-            }
-            Event::CData(text) => {
-                if collecting != Collecting::Nothing {
-                    buffer.push_str(&text);
-                }
-            }
+            Event::Text(text) if collecting != Collecting::Nothing => buffer.push_str(&text),
+            Event::CData(text) if collecting != Collecting::Nothing => buffer.push_str(&text),
             _ => {}
         }
     }
