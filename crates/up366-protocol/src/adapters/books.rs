@@ -16,12 +16,15 @@ pub async fn books(client: &Client) -> Result<Vec<Book>> {
     decode_items(items, endpoint.name)
 }
 
-/// Books attached to the student's courses.
+/// Books attached to the student's courses, each with the course that assigned
+/// it.
 ///
 /// `/client/books/buy-book` only returns purchased goods. Course books such as
 /// 新概念英语 are assigned by the class and only appear in `data[].books` of
-/// `/client/student/course/list`, so the shelf has to read both lists.
-pub async fn course_books(client: &Client) -> Result<Vec<Book>> {
+/// `/client/student/course/list`, so the shelf has to read both lists. The
+/// course id is kept because `books/tree` only returns some assigned books
+/// when the request carries it.
+pub async fn course_books(client: &Client) -> Result<Vec<(String, Book)>> {
     let endpoint = endpoint("course_books")?;
     let data = client.call(endpoint, &[]).await?;
     let courses = codec::into_array(data, endpoint.name)?;
@@ -30,7 +33,12 @@ pub async fn course_books(client: &Client) -> Result<Vec<Book>> {
         let Some(items) = course.get("books").and_then(|value| value.as_array()) else {
             continue;
         };
-        books.extend(decode_items(items.clone(), endpoint.name)?);
+        let Some(course_id) = course.get("courseId").and_then(codec::value_to_string) else {
+            continue;
+        };
+        for book in decode_items(items.clone(), endpoint.name)? {
+            books.push((course_id.clone(), book));
+        }
     }
     Ok(books)
 }
@@ -56,18 +64,26 @@ pub async fn book_info(client: &Client, book_id: &str, book_type: i64) -> Result
 }
 
 /// `data` tree from `/client/books/tree`. `version=""` forces a fresh tree.
-pub async fn book_tree(client: &Client, book_id: &str, book_type: i64) -> Result<BookTree> {
+///
+/// `course_id` is needed for some class-assigned books: 新概念英语1 answers an
+/// empty tree unless the request carries the assigning course. It is optional
+/// because sending an unrelated course can make other books answer empty.
+pub async fn book_tree(
+    client: &Client,
+    book_id: &str,
+    book_type: i64,
+    course_id: Option<&str>,
+) -> Result<BookTree> {
     let endpoint = endpoint("book_tree")?;
-    let data = client
-        .call(
-            endpoint,
-            &[
-                ("bookId", json!(book_id)),
-                ("version", json!("")),
-                ("bookType", json!(book_type)),
-            ],
-        )
-        .await?;
+    let mut params = vec![
+        ("bookId", json!(book_id)),
+        ("version", json!("")),
+        ("bookType", json!(book_type)),
+    ];
+    if let Some(course_id) = course_id {
+        params.push(("courseId", json!(course_id)));
+    }
+    let data = client.call(endpoint, &params).await?;
     BookTree::from_value(codec::require_data(data, endpoint.name)?)
 }
 
@@ -161,10 +177,12 @@ mod tests {
 
         // Flattening keeps the duplicate: the shelf dedupes across both sources.
         assert_eq!(books.len(), 3);
-        assert_eq!(books[0].id(), Some("B-1"));
-        assert_eq!(books[0].title(), "新概念英语1");
-        assert_eq!(books[0].raw["bookType"], json!(2));
-        assert_eq!(books[2].id(), Some("B-1"));
+        assert_eq!(books[0].0, "1");
+        assert_eq!(books[0].1.id(), Some("B-1"));
+        assert_eq!(books[0].1.title(), "新概念英语1");
+        assert_eq!(books[0].1.raw["bookType"], json!(2));
+        assert_eq!(books[2].0, "2");
+        assert_eq!(books[2].1.id(), Some("B-1"));
         mock.assert_hits(1);
     }
 
@@ -198,7 +216,8 @@ mod tests {
                 .path("/client/books/tree")
                 .body_contains("bookId=BOOK-1")
                 .body_contains("version=")
-                .body_contains("bookType=2");
+                .body_contains("bookType=2")
+                .body_contains("courseId=COURSE-9");
             then.status(200).json_body(ok(json!({
                 "version": "v42",
                 "book": { "configs": { "customFlag": 1 } },
@@ -209,7 +228,9 @@ mod tests {
         });
 
         let client = client(&server);
-        let tree = book_tree(&client, "BOOK-1", 2).await.unwrap();
+        let tree = book_tree(&client, "BOOK-1", 2, Some("COURSE-9"))
+            .await
+            .unwrap();
 
         assert_eq!(tree.version.as_deref(), Some("v42"));
         assert!(tree.has_custom_chapters());

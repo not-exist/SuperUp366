@@ -21,10 +21,14 @@ export function BookDetail() {
   // The shelf carries the real `bookType`; a type-2 book fails `book_info` if
   // it is requested as type 1. A direct URL without it falls back to 1.
   const bookType = Number(params.get("type")) || 1;
+  // Some class-assigned books only return their chapters when the assigning
+  // course is included in the tree request.
+  const courseId = params.get("course");
 
   const detail = useQuery({
-    queryKey: ["book", account.account_id, bookId, bookType],
-    queryFn: () => api.getBook(account.account_id, bookId ?? "", bookType),
+    queryKey: ["book", account.account_id, bookId, bookType, courseId],
+    queryFn: () =>
+      api.getBook(account.account_id, bookId ?? "", bookType, courseId),
     enabled: Boolean(bookId),
   });
 

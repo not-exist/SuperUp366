@@ -96,7 +96,18 @@ hardcodes `1` because its shelf (`buy-book`) only contains purchased books, but
 class-assigned course books are `bookType=2`: asking `book_info` for one of
 those as type 1 answers `code: 0` with no `data` (verified on 新概念英语2,
 语法专项练习, 同步英语培优计划-同步词汇, 假期充电周), while `bookType=2` returns
-the record. `books/tree` is empty for `bookType=2` books either way.
+the record.
+
+`books/tree` needs the assigning `courseId` for some course books: 新概念英语1
+answers zero chapters with `bookType=2` alone and 72 chapters / 144 pages when
+`courseId=9222783` is included. Sending a course that does not own the book can
+empty other books (高中新课标3000词 intermittently), so call without it first
+and retry with it only when the answer has no content.
+
+Type-2 course books return `chapters` and `pages` but **no `tasks`**: the
+content pages (`isContent=1`, `paperId`) are the assignments, and the reader
+keys `finished-task/list` rows on the page `id`. Ordinary books keep using
+`tasks` (type 3) and pages only for display names.
 
 The assignment list is `tasks`; a page only links to one through `taskId`, and
 many chapters (for example 测验) have a task and no page at all. Iterating

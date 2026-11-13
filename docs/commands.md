@@ -65,7 +65,7 @@ yields two rows.
 | Command | Args | Returns |
 | --- | --- | --- |
 | `books_list` | `account_id` | `Book[]` |
-| `book_detail` | `account_id, book_id, book_type` | `BookDetail` (book + chapters + job rows) |
+| `book_detail` | `account_id, book_id, book_type, course_id` | `BookDetail` (book + chapters + job rows) |
 
 `books_list` is shelf metadata only: a book's total task count needs the whole
 tree (megabytes for a large reader book), so it is fetched on the detail page.
@@ -75,10 +75,14 @@ books attached to the student's courses (`/client/student/course/list`,
 latter. A book in both lists is shown once. Each row carries `book_type`
 (1 = purchased, 2 = class-assigned), and `book_detail` sends it back as
 `bookType`: requesting a type-2 book as type 1 makes `book_info` answer
-`code: 0` with no `data`.
+`code: 0` with no `data`. The row also carries `course_id` when a course
+assigned the book; `books/tree` returns 新概念英语1's chapters only when the
+request includes it, so the detail command asks without the course first and
+retries with it when that answer has no content.
 `book_detail` builds rows from the tree's `tasks` array (type 3), using a page
 (type 2) only for the display name and falling back to the owning chapter's
-title when a task has no page. `progress` / `total` come from
+title when a task has no page. Type-2 content books carry no `tasks`: there the
+content pages (`isContent=1` / `paperId`) are the rows, keyed by page id. `progress` / `total` come from
 `finished-task/list`. Book rows are display-only: a book task id is not a job
 id, so the answer route cannot open it.
 

@@ -42,7 +42,12 @@ export function Books() {
           {books.data.map((book) => (
             <Link
               key={book.book_id}
-              to={`/books/${book.book_id}?type=${book.book_type}`}
+              to={
+                `/books/${book.book_id}?type=${book.book_type}` +
+                (book.course_id
+                  ? `&course=${encodeURIComponent(book.course_id)}`
+                  : "")
+              }
               className="book-card"
             >
               <span className="book-cover" aria-hidden="true">

@@ -69,6 +69,8 @@ export interface Book {
   is_2025_reader: boolean;
   /** 1 = purchased, 2 = class-assigned. The detail call must send it back. */
   book_type: number;
+  /** Course that assigned the book; its tree needs this course id. */
+  course_id: string | null;
 }
 
 export interface BookJob {
@@ -302,7 +304,12 @@ export interface CommandMap {
 
   books_list: { args: { account_id: string }; result: Book[] };
   book_detail: {
-    args: { account_id: string; book_id: string; book_type: number };
+    args: {
+      account_id: string;
+      book_id: string;
+      book_type: number;
+      course_id: string | null;
+    };
     result: BookDetail;
   };
 
