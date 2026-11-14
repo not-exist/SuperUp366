@@ -516,14 +516,6 @@ pub struct BookTaskNode {
     /// `1` = ordinary paper, `2` = vocabulary (word-skill) assignment.
     #[serde(default, deserialize_with = "flex::opt_i64")]
     pub task_type: Option<i64>,
-    #[serde(default, deserialize_with = "flex::opt_f64")]
-    pub task_score: Option<f64>,
-    #[serde(default, deserialize_with = "flex::opt_f64")]
-    pub score: Option<f64>,
-    #[serde(default, deserialize_with = "flex::opt_f64")]
-    pub percent: Option<f64>,
-    #[serde(default, deserialize_with = "flex::opt_i64")]
-    pub seconds: Option<i64>,
     #[serde(default)]
     pub raw: Value,
 }
@@ -571,8 +563,6 @@ pub struct BookQuestionRow {
     pub score: Option<f64>,
     #[serde(default, deserialize_with = "flex::opt_f64")]
     pub avg_score: Option<f64>,
-    #[serde(default, deserialize_with = "flex::opt_f64")]
-    pub score_rate: Option<f64>,
     #[serde(default)]
     pub raw: Value,
 }
@@ -592,8 +582,6 @@ pub struct BookWordRow {
     pub word: String,
     #[serde(default, deserialize_with = "flex::opt_bool")]
     pub pass: Option<bool>,
-    #[serde(default, deserialize_with = "flex::opt_i64")]
-    pub degree: Option<i64>,
     #[serde(default)]
     pub raw: Value,
 }

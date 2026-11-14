@@ -117,7 +117,6 @@ export interface BookTaskQuestion {
   max_score: number | null;
   score: number | null;
   class_average: number | null;
-  score_rate: number | null;
   read_aloud: boolean;
 }
 
@@ -129,7 +128,6 @@ export interface BookWord {
 
 /** Read-only detail of one book assignment. */
 export interface BookTaskDetail {
-  task_id: string;
   kind: JobKind;
   read_aloud: boolean;
   questions: BookTaskQuestion[];

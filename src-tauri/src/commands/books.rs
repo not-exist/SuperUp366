@@ -241,7 +241,6 @@ pub struct BookQuestionView {
     pub max_score: Option<f64>,
     pub score: Option<f64>,
     pub class_average: Option<f64>,
-    pub score_rate: Option<f64>,
     pub read_aloud: bool,
 }
 
@@ -255,7 +254,6 @@ pub struct BookWordView {
 /// Read-only detail of one book assignment.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BookTaskView {
-    pub task_id: String,
     pub kind: JobKind,
     /// Whether any question is a recording (`questionTypeNum` 9/12/13).
     pub read_aloud: bool,
@@ -287,7 +285,6 @@ pub async fn book_task_get(
             .await
             .map_err(|error| state.session_error(&account_id, &client, error))?;
         return Ok(BookTaskView {
-            task_id,
             kind: JobKind::WordPk,
             read_aloud: false,
             questions: Vec::new(),
@@ -309,7 +306,6 @@ pub async fn book_task_get(
         .map_err(|error| state.session_error(&account_id, &client, error))?;
     let read_aloud = rows.iter().any(|row| row.is_read_aloud());
     Ok(BookTaskView {
-        task_id,
         kind: JobKind::Ordinary,
         read_aloud,
         questions: rows
@@ -326,7 +322,6 @@ pub async fn book_task_get(
                     max_score: row.question_score,
                     score: row.score,
                     class_average: row.avg_score,
-                    score_rate: row.score_rate,
                     read_aloud,
                 }
             })

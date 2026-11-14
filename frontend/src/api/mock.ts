@@ -539,7 +539,6 @@ export async function handleMock(
       }
       if (word_task) {
         const result: BookTaskDetail = {
-          task_id,
           kind: "word_pk",
           read_aloud: false,
           questions: [],
@@ -551,7 +550,6 @@ export async function handleMock(
         return result;
       }
       const result: BookTaskDetail = {
-        task_id,
         kind: "ordinary",
         read_aloud: job.read_aloud,
         words: [],
@@ -565,7 +563,6 @@ export async function handleMock(
           max_score: 10,
           score: job.read_aloud ? 8.5 : 10,
           class_average: 7.9,
-          score_rate: 0.79,
           read_aloud: job.read_aloud,
         })),
       };
