@@ -124,6 +124,15 @@ pub const ENDPOINTS: &[Endpoint] = &[
         false,
         BodyKind::Form,
     ),
+    // The official H5 "history" tab: a date-range job list that still carries
+    // assignments the live `course/job` call has dropped.
+    ep(
+        "range_jobs",
+        STUDYTASK_API,
+        "/client/student/all/course/range/job",
+        false,
+        BodyKind::Form,
+    ),
     ep(
         "finished_tasks",
         DSB_API,

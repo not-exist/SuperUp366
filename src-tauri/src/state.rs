@@ -130,7 +130,14 @@ impl JobView {
         read_aloud: bool,
         state: Option<JobState>,
     ) -> Self {
-        let deadline = job.end_time.clone();
+        // Upstream sends either an epoch-millis string or ISO-8601. The
+        // frontend parses `new Date(value)`, which rejects a bare epoch string,
+        // so normalize at this boundary.
+        let deadline = job
+            .end_time
+            .as_deref()
+            .and_then(up366_core::parse_deadline)
+            .map(|time| time.to_rfc3339());
         let status = match state {
             Some(JobState::Finished { score }) => StatusView::Finished { score },
             Some(JobState::Returned) => StatusView::Returned,
@@ -232,6 +239,16 @@ mod tests {
         assert_eq!(view.name, "Unit 4");
         // `contentId` is never used as the job id.
         assert_ne!(view.job_id, "CONTENT-1");
+    }
+
+    #[test]
+    fn job_view_turns_epoch_deadlines_into_iso() {
+        let mut job = job();
+        job.end_time = Some("1794873600000".to_owned());
+
+        let view = JobView::new(&job, "英语一班", "一班", None, false);
+
+        assert_eq!(view.deadline.as_deref(), Some("2026-11-17T00:00:00+00:00"));
     }
 
     #[test]
