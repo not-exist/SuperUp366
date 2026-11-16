@@ -49,12 +49,26 @@ pub fn inspect_mp3(path: impl AsRef<Path>) -> Result<AudioFileInfo> {
     // Hash the whole file, including the header bytes just consumed.
     file.seek(SeekFrom::Start(0))?;
     let mut hasher = Sha256::new();
-    let size = std::io::copy(&mut file, &mut hasher)?;
+    let mut buf = [0u8; 64 * 1024];
+    let mut size = 0u64;
+    loop {
+        let read = file.read(&mut buf)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buf[..read]);
+        size += read as u64;
+    }
+    let mut sha256 = String::with_capacity(64);
+    for byte in hasher.finalize() {
+        use std::fmt::Write as _;
+        write!(sha256, "{byte:02x}").expect("writing to a String cannot fail");
+    }
 
     Ok(AudioFileInfo {
         path: path.to_owned(),
         size,
-        sha256: format!("{:x}", hasher.finalize()),
+        sha256,
     })
 }
 
