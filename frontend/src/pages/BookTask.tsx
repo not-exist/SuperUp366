@@ -83,6 +83,7 @@ export function BookTask() {
             <div
               key={word.word}
               className={`word-card${word.mastered ? " word-card--known" : ""}`}
+              data-testid="book-word"
             >
               <div className="word-head">
                 <span className="word-title">{word.word}</span>
@@ -112,6 +113,7 @@ export function BookTask() {
             <article
               key={question.question_id || index}
               className="question-card"
+              data-testid="book-question"
             >
               <div className="question-head">
                 <span className="question-no">

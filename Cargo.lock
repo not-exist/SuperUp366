@@ -5696,7 +5696,6 @@ dependencies = [
  "up366-media",
  "up366-protocol",
  "up366-store",
- "up366-sync",
  "uuid",
 ]
 
@@ -5718,7 +5717,6 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror 2.0.21",
- "up366-core",
 ]
 
 [[package]]
@@ -5750,7 +5748,6 @@ version = "0.1.0"
 dependencies = [
  "keyring",
  "serde",
- "serde_json",
  "sqlx",
  "thiserror 2.0.21",
  "tokio",

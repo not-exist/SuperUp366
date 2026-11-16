@@ -25,17 +25,44 @@
 ## 构建与验证
 
 ```bash
-cargo test --workspace
-cargo check --workspace --all-targets
-pnpm --dir frontend build          # 内含 tsc --noEmit
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-targets --locked
+pnpm --dir frontend lint
+pnpm --dir frontend typecheck
+pnpm --dir frontend e2e            # build:e2e + Playwright；全部命令走 mock，不联网
+cargo deny check                   # 依赖审计（需预先安装 cargo-deny；CI 用同一份 deny.toml）
 ```
+
+`pnpm --dir frontend e2e` 使用 `src/api/mock.ts` 作为假后端，不需要账号，也不会发出网络请求；
+新增页面应同时补 `frontend/e2e/*.spec.ts` 与稳定的 `data-testid`。
 
 交付前必须真实编译，而不是只跑单测：
 
 ```bash
 cargo build --release -p up366-app --features custom-protocol
-# 产物：target/release/up366-app.exe
+# 产物：target/release/up366-app.exe（Windows）或 up366-app（Linux）
+
+# 安装包（@tauri-apps/cli 在 frontend devDependencies 中）
+node frontend/node_modules/@tauri-apps/cli/tauri.js build --bundles nsis          # Windows
+node frontend/node_modules/@tauri-apps/cli/tauri.js build --bundles deb,appimage  # Linux
+# 产物：target/release/bundle/
 ```
+
+## CI
+
+`.github/workflows/` 下的四个文件：
+
+| 文件 | 作用 |
+|---|---|
+| `ci.yml` | 主门禁：quality → test（Windows + Ubuntu）/ e2e / audit → package |
+| `package.yml` | 可复用：双平台编译并打包 nsis / deb+appimage，上传为 action 产物 |
+| `audit.yml` | 可复用 + 每周定时：cargo-deny（advisories/bans/sources/licenses）与 pnpm audit |
+| `release.yml` | `v*` tag：复用 package，创建 draft release |
+
+- PR 也执行打包，产物挂在 run 的 Artifacts 区；所有检查都不需要 Secret。
+- 新增依赖后若 `cargo-deny` 报许可证，先确认许可证再改 `deny.toml` 的 allow 列表。
+- CI 与本地使用同一套命令；失败时优先在本地复现对应 job 的步骤。
 
 ## 代码结构
 

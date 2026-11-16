@@ -60,10 +60,19 @@ async function pickMp3(): Promise<{ path: string; name: string } | null> {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".mp3,audio/mpeg";
+    // The input is attached so the browser (and Playwright's file chooser)
+    // treats the click as a real user gesture; it is removed on teardown.
+    const finish = (value: { path: string; name: string } | null) => {
+      input.remove();
+      resolve(value);
+    };
     input.onchange = () => {
       const file = input.files?.[0];
-      resolve(file ? { path: file.name, name: file.name } : null);
+      finish(file ? { path: file.name, name: file.name } : null);
     };
+    input.addEventListener("cancel", () => finish(null), { once: true });
+    input.style.display = "none";
+    document.body.append(input);
     input.click();
   });
 }
@@ -166,7 +175,7 @@ export function ReadAloud() {
   });
 
   return (
-    <div className="page">
+    <div className="page" data-testid="readaloud-page">
       <header className="page-header">
         <div>
           <h1 className="page-title">{task.data?.title ?? "朗读跟读"}</h1>
@@ -203,7 +212,11 @@ export function ReadAloud() {
       )}
 
       {confirmed && (
-        <div className="banner banner--success" role="status">
+        <div
+          className="banner banner--success"
+          role="status"
+          data-testid="readaloud-result"
+        >
           <strong>{confirmed.verified ? "提交成功" : "已发送，等待服务端刷新"}</strong>
           <span>{confirmed.message}</span>
         </div>
@@ -233,6 +246,7 @@ export function ReadAloud() {
             <button
               type="button"
               className="button button--primary"
+              data-testid="readaloud-preview"
               onClick={() => previewMutation.mutate()}
               disabled={
                 !allUploaded || submitted || previewMutation.isPending || confirmed !== null
@@ -269,10 +283,17 @@ export function ReadAloud() {
               const local = uploads[slot.question_id];
               const recordUrl = recordUrlFor(slot);
               return (
-                <article key={slot.question_id} className="read-card">
+                <article
+                  key={slot.question_id}
+                  className="read-card"
+                  data-testid={`readaloud-slot-${slot.number}`}
+                >
                   <div className="read-head">
                     <span className="question-no">第 {slot.number} 题</span>
-                    <span className={`badge ${UPLOAD_BADGE[status]}`}>
+                    <span
+                      className={`badge ${UPLOAD_BADGE[status]}`}
+                      data-testid={`readaloud-status-${slot.number}`}
+                    >
                       <span className="badge__dot" aria-hidden="true" />
                       {UPLOAD_LABELS[status]}
                     </span>
@@ -286,6 +307,7 @@ export function ReadAloud() {
                     <button
                       type="button"
                       className="button"
+                      data-testid={`readaloud-pick-${slot.number}`}
                       onClick={() => void handlePick(slot)}
                       disabled={submitted || status === "uploading"}
                     >

@@ -1,5 +1,7 @@
 # SuperUp366
 
+[![CI](https://github.com/not-exist/SuperUp366/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/not-exist/SuperUp366/actions/workflows/ci.yml)
+
 天学网（up366）学生端的本地自用桌面客户端。
 
 - **Rust** — 协议、领域模型、缓存与安全存储
@@ -46,17 +48,31 @@ docs/protocol/     已确认协议与待探测项
 ## 开发
 
 ```bash
-cargo test --workspace
-pnpm --dir frontend build
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-targets --locked
+
+pnpm --dir frontend lint
+pnpm --dir frontend typecheck
+pnpm --dir frontend e2e            # Playwright，全部命令由 mock 后端应答，不联网
 
 # 独立可执行文件（内嵌前端，不依赖 localhost）
 cargo build --release -p up366-app --features custom-protocol
 # 产物：target/release/up366-app.exe
 
+# 安装包：Windows 为 nsis，Linux 为 deb + AppImage
+node frontend/node_modules/@tauri-apps/cli/tauri.js build --bundles nsis
+node frontend/node_modules/@tauri-apps/cli/tauri.js build --bundles deb,appimage
+# 产物：target/release/bundle/
+
 # 或者调试时先起 Vite，再 cargo run（不带 custom-protocol 时读 devUrl）
 pnpm --dir frontend dev
 cargo run -p up366-app
 ```
+
+CI（`.github/workflows/ci.yml`）在 Windows 与 Ubuntu 上跑测试，并执行 fmt、clippy、lint、
+typecheck、Playwright e2e、cargo-deny / pnpm audit；全部通过后会把 Windows 安装包与
+Ubuntu 的 `.deb` / `.AppImage` 上传到该次 action 的 Artifacts。
 
 `custom-protocol` 特性决定 Tauri 加载内嵌的 `frontend/dist`；不带它时构建会去连
 `build.devUrl`（默认 `http://localhost:5173`），没有开发服务器就会报

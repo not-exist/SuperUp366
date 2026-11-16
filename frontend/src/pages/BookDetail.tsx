@@ -61,7 +61,7 @@ export function BookDetail() {
 
       {detail.isSuccess && (
         <>
-          <section className="book-hero">
+          <section className="book-hero" data-testid="book-hero">
             <span className="book-cover" aria-hidden="true">
               {detail.data.name.slice(0, 1)}
             </span>
@@ -138,7 +138,7 @@ function ChapterSection({
   const visible = jobs.slice(0, limit);
 
   return (
-    <section className="chapter">
+    <section className="chapter" data-testid="chapter">
       <h3 className="chapter-title">{chapter.title}</h3>
       {jobs.length === 0 ? (
         <p className="field-hint">本章暂无作业。</p>
@@ -157,6 +157,7 @@ function ChapterSection({
             return (
               <Link
                 key={job.job_id}
+                data-testid={`book-job-${job.job_id}`}
                 to={bookTaskPath(bookId, bookType, courseId, job)}
                 className="job-row job-row--book"
               >

@@ -41,3 +41,11 @@ node_modules/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Documentation drafts (kept local; protocol facts are pinned in code and tests)
+/docs/
+
+# Playwright output
+/frontend/test-results/
+/frontend/playwright-report/
+/frontend/blob-report/

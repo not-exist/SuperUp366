@@ -1,0 +1,63 @@
+# cargo-deny configuration.
+#
+# `advisories` and `sources` are hard gates: a known vulnerability or a crate
+# pulled from outside crates.io fails CI. `licenses` is a gate too, but the
+# allow list below is deliberately broad enough for the current dependency
+# tree; new licenses must be reviewed rather than silently accepted.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "warn"
+ignore = [
+  # Unmaintained, all pulled in transitively by the dev-only `httpmock` chain
+  # (async-std -> pin-utils) or by the gtk build chain (proc-macro-error).
+  # They never ship in the binary; revisit when httpmock/tauri move off them.
+  "RUSTSEC-2025-0052",
+  "RUSTSEC-2026-0441",
+  "RUSTSEC-2024-0370",
+  # libsqlite3-sys 0.30 bundles SQLite 3.53.2 (CVE-2026-119375): exploiting it
+  # requires the victim to open an attacker-written database plus a mismatched
+  # `-wal` sibling. This client only opens its own app-data database, and sqlx
+  # 0.9 still caps libsqlite3-sys below the fixed 0.39. Revisit on every sqlx
+  # bump; remove this entry once the bundled SQLite is >= 3.54.
+  "RUSTSEC-2026-0459",
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "Zlib",
+  "MPL-2.0",
+  "CC0-1.0",
+  "BSL-1.0",
+  "OpenSSL",
+  "CDLA-Permissive-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Workspace members are path-only dependencies, which are not registry
+# wildcards; keep `wildcards = "deny"` for anything from crates.io.
+allow-wildcard-paths = true
+highlight = "all"
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

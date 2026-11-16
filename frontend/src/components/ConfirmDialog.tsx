@@ -44,6 +44,7 @@ export function ConfirmDialog({
   return (
     <dialog
       ref={ref}
+      data-testid="confirm-dialog"
       className="dialog"
       aria-labelledby="confirm-dialog-title"
       aria-describedby="confirm-dialog-summary"
@@ -63,6 +64,7 @@ export function ConfirmDialog({
           <button
             type="button"
             className="button"
+            data-testid="confirm-cancel"
             onClick={onCancel}
             disabled={busy}
           >
@@ -71,6 +73,7 @@ export function ConfirmDialog({
         )}
         <button
           type="button"
+          data-testid="confirm-submit"
           className={
             tone === "danger" ? "button button--danger" : "button button--primary"
           }

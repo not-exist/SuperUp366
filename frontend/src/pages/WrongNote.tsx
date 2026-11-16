@@ -84,7 +84,7 @@ export function WrongNote() {
   );
 
   return (
-    <div className="page">
+    <div className="page" data-testid="wrongnote-page">
       <header className="page-header">
         <div>
           <h1 className="page-title">错题本</h1>
@@ -100,7 +100,7 @@ export function WrongNote() {
             <h2 className="correction-title">一键订正</h2>
             {correction.isSuccess ? (
               <div className="correction-stats">
-                <strong>
+                <strong data-testid="correction-remaining">
                   未清理 {correction.data.remaining_count} 题
                 </strong>
                 <span>已订正 {correction.data.corrected_count} 题</span>
@@ -130,6 +130,7 @@ export function WrongNote() {
                 type="number"
                 min={1}
                 max={maxCorrectionCount}
+                data-testid="correction-count"
                 value={correctionCount}
                 onChange={(event) =>
                   setCorrectionCount(
@@ -166,6 +167,7 @@ export function WrongNote() {
             <button
               type="button"
               className="button button--primary"
+              data-testid="correction-draw"
               disabled={drawCorrectionMutation.isPending}
               onClick={() => drawCorrectionMutation.mutate()}
             >
@@ -189,7 +191,11 @@ export function WrongNote() {
         )}
 
         {correctionRun && (
-          <div className="banner banner--success" role="status">
+          <div
+            className="banner banner--success"
+            role="status"
+            data-testid="correction-result"
+          >
             <strong>订正已提交</strong>
             <span>{correctionRun.message}</span>
             {correctionStatus.data && (
@@ -222,7 +228,7 @@ export function WrongNote() {
         )}
 
         {drawn && drawn.questions.length > 0 && (
-          <div className="correction-preview">
+          <div className="correction-preview" data-testid="correction-preview">
             <div className="overall-row">
               <span>
                 本次抽到 {drawn.questions.length} 题，共 {drawn.total_score} 分
@@ -231,6 +237,7 @@ export function WrongNote() {
                 <button
                   type="button"
                   className="button button--primary"
+                  data-testid="correction-submit"
                   onClick={() => setCorrectionConfirmOpen(true)}
                 >
                   提交这份订正

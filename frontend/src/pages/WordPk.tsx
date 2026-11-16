@@ -76,7 +76,7 @@ export function WordPk() {
   }
 
   return (
-    <div className="page">
+    <div className="page" data-testid="wordpk-page">
       <header className="page-header">
         <div>
           <h1 className="page-title">{preview?.title ?? "单词 PK"}</h1>
@@ -99,20 +99,24 @@ export function WordPk() {
       )}
 
       {result && (
-        <div className="banner banner--success" role="status">
+        <div
+          className="banner banner--success"
+          role="status"
+          data-testid="wordpk-result"
+        >
           <strong>{result.ok ? "提交成功" : "提交失败"}</strong>
           <span>{result.message}</span>
         </div>
       )}
 
       {submit.isError && (
-        <div className="banner banner--danger" role="alert">
+        <div className="banner banner--danger" role="alert" data-testid="wordpk-submit-error">
           {errorMessage(submit.error)}
         </div>
       )}
 
       {draw.isError && (
-        <div className="banner banner--danger" role="alert">
+        <div className="banner banner--danger" role="alert" data-testid="wordpk-draw-error">
           {errorMessage(draw.error)}
         </div>
       )}
@@ -152,6 +156,7 @@ export function WordPk() {
           <button
             type="button"
             className="button button--primary"
+            data-testid="wordpk-draw"
             onClick={startDraw}
             disabled={!inputValid || draw.isPending}
           >
@@ -163,6 +168,7 @@ export function WordPk() {
             <button
               type="button"
               className="button"
+              data-testid="wordpk-submit"
               onClick={() => setConfirmOpen(true)}
               disabled={submit.isPending || result?.ok === true}
             >
@@ -183,7 +189,11 @@ export function WordPk() {
 
       {preview && (
         <>
-          <section className="answer-summary" aria-label="本局统计">
+          <section
+            className="answer-summary"
+            aria-label="本局统计"
+            data-testid="wordpk-summary"
+          >
             <div className="stat">
               <div className="stat-label">本局总词数</div>
               <div className="stat-value">{preview.total}</div>
@@ -207,6 +217,7 @@ export function WordPk() {
               <article
                 key={word.word_id}
                 className={`word-card${word.correct ? " word-card--known" : ""}`}
+                data-testid="word-card"
               >
                 <div className="word-head">
                   <span className="word-title">{word.word}</span>

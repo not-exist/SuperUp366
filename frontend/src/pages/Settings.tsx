@@ -92,7 +92,11 @@ export function SettingsPage() {
         </div>
       </header>
 
-      <section className="card settings-card" aria-labelledby="account-heading">
+      <section
+        className="card settings-card"
+        aria-labelledby="account-heading"
+        data-testid="settings-account"
+      >
         <h2 className="section-title" id="account-heading">
           当前账号
         </h2>
@@ -137,7 +141,7 @@ export function SettingsPage() {
         <h2 className="section-title">请求</h2>
 
         {saved && (
-          <div className="banner banner--success" role="status">
+          <div className="banner banner--success" role="status" data-testid="settings-saved">
             <CheckIcon />
             <span>设置已保存。</span>
           </div>
@@ -231,6 +235,7 @@ export function SettingsPage() {
           <button
             type="submit"
             className="button button--primary"
+            data-testid="settings-save"
             disabled={update.isPending}
           >
             {update.isPending ? "保存中…" : "保存设置"}
@@ -249,7 +254,7 @@ export function SettingsPage() {
           清理缓存的作业、书籍和答案数据，不会退出账号，也不会删除录音文件。
         </p>
         {cacheMessage && (
-          <div className="banner banner--success" role="status">
+          <div className="banner banner--success" role="status" data-testid="cache-cleared">
             {cacheMessage}
           </div>
         )}
@@ -261,6 +266,7 @@ export function SettingsPage() {
         <button
           type="button"
           className="button button--danger"
+          data-testid="settings-clear-cache"
           onClick={() => {
             setCacheMessage(null);
             setCacheOpen(true);

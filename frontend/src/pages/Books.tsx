@@ -38,10 +38,11 @@ export function Books() {
       )}
 
       {books.isSuccess && books.data.length > 0 && (
-        <div className="book-grid">
+        <div className="book-grid" data-testid="book-grid">
           {books.data.map((book) => (
             <Link
               key={book.book_id}
+              data-testid={`book-card-${book.book_id}`}
               to={
                 `/books/${book.book_id}?type=${book.book_type}` +
                 (book.course_id

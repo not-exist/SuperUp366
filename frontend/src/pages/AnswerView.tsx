@@ -49,7 +49,7 @@ export function AnswerView() {
   );
 
   return (
-    <div className="page">
+    <div className="page" data-testid="answer-page">
       <header className="page-header">
         <div>
           <h1 className="page-title">{answer.data?.title ?? "作业答案"}</h1>
@@ -90,7 +90,11 @@ export function AnswerView() {
 
       {answer.isSuccess && questions.length > 0 && (
         <>
-          <section className="answer-summary" aria-label="答题统计">
+          <section
+            className="answer-summary"
+            aria-label="答题统计"
+            data-testid="answer-summary"
+          >
             <div className="stat">
               <div className="stat-label">正确</div>
               <div className="stat-value">{counts.right}</div>
@@ -111,7 +115,11 @@ export function AnswerView() {
 
           <div className="stack">
             {questions.map((question) => (
-              <article key={question.question_id} className="question-card">
+              <article
+                key={question.question_id}
+                className="question-card"
+                data-testid="question-card"
+              >
                 <div className="question-head">
                   <span className="question-no">第 {question.number} 题</span>
                   <span className={`badge ${ANSWER_BADGE[question.status]}`}>

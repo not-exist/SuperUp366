@@ -50,6 +50,7 @@ export function AppShell({ account }: { account: Account }) {
               <NavLink
                 key={to}
                 to={to}
+                data-testid={`nav-${to.slice(1)}`}
                 className={({ isActive }) =>
                   `nav-link${isActive ? " nav-link--active" : ""}`
                 }
@@ -61,7 +62,7 @@ export function AppShell({ account }: { account: Account }) {
           </nav>
 
           <div className="sidebar-footer">
-            <div className="account-summary">
+            <div className="account-summary" data-testid="active-account">
               <span className="avatar" aria-hidden="true">
                 {initialOf(account.display_name)}
               </span>
@@ -82,6 +83,7 @@ export function AppShell({ account }: { account: Account }) {
                 className="button button--sm button--ghost icon-button"
                 aria-label="退出登录"
                 title="退出登录"
+                data-testid="logout"
                 onClick={() => logout.mutate()}
                 disabled={logout.isPending}
               >

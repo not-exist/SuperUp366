@@ -91,10 +91,11 @@ export function Login() {
         )}
 
         {accounts.data && accounts.data.length > 0 && (
-          <div className="account-list">
+          <div className="account-list" data-testid="account-list">
             {accounts.data.map((account) => (
               <div
                 key={account.account_id}
+                data-testid={`account-row-${account.account_id}`}
                 className={`account-row${account.active ? " account-row--active" : ""}`}
               >
                 <div className="avatar" aria-hidden="true">
@@ -139,7 +140,7 @@ export function Login() {
         )}
 
         {switchAccount.isError && (
-          <div className="banner banner--danger" role="alert">
+          <div className="banner banner--danger" role="alert" data-testid="switch-error">
             {errorMessage(switchAccount.error)}
           </div>
         )}
@@ -152,7 +153,12 @@ export function Login() {
         )}
 
         {!showForm && (
-          <button type="button" className="button" onClick={openNewAccount}>
+          <button
+            type="button"
+            className="button"
+            data-testid="login-new-account"
+            onClick={openNewAccount}
+          >
             <PlusIcon />
             登录其他账号
           </button>
@@ -161,6 +167,7 @@ export function Login() {
         {showForm && (
           <form
             className="login-form"
+            data-testid="login-form"
             onSubmit={(event) => {
               event.preventDefault();
               login.mutate();
@@ -171,7 +178,7 @@ export function Login() {
             </h2>
 
             {login.isError && (
-              <div className="banner banner--danger" role="alert">
+              <div className="banner banner--danger" role="alert" data-testid="login-error">
                 {errorMessage(login.error)}
               </div>
             )}
@@ -220,6 +227,7 @@ export function Login() {
               )}
               <button
                 type="submit"
+                data-testid="login-submit"
                 className="button button--primary"
                 disabled={login.isPending}
               >

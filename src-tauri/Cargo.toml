@@ -5,6 +5,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+publish.workspace = true
 repository.workspace = true
 
 [lib]
@@ -35,7 +36,6 @@ up366-core.workspace = true
 up366-protocol.workspace = true
 up366-store.workspace = true
 up366-media.workspace = true
-up366-sync.workspace = true
 
 [dev-dependencies]
 futures = "0.3"

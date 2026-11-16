@@ -91,11 +91,11 @@ export function Jobs() {
   }
 
   return (
-    <div className="page page--fill">
+    <div className="page page--fill" data-testid="jobs-page">
       <header className="page-header">
         <div>
           <h1 className="page-title">作业</h1>
-          <p className="page-subtitle">
+          <p className="page-subtitle" data-testid="jobs-summary">
             所有班级合并为一个列表，保持官方顺序。共 {jobs.data?.length ?? 0} 项
             {hasFilters ? `，筛选后 ${filtered.length} 项` : ""}。
           </p>
@@ -205,6 +205,7 @@ export function Jobs() {
         <div
           ref={scrollRef}
           className="job-list-scroll"
+          data-testid="job-list"
           role="list"
           aria-label="作业列表"
         >
@@ -234,6 +235,7 @@ export function Jobs() {
                 >
                   <Link
                     to={jobPath(job)}
+                    data-testid={`job-row-${job.job_id}`}
                     className="job-row"
                     style={{ height: "100%" }}
                   >

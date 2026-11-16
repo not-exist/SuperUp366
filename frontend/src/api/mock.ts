@@ -35,6 +35,13 @@ import type {
 const DAY = 86_400_000;
 const BASE = Date.parse("2026-11-07T09:00:00.000Z");
 
+/**
+ * `vite build --mode e2e` swaps this to true. The Playwright suite relies on
+ * it: delays collapse to zero and `window.__mock` exposes reset and failure
+ * injection. Production builds never define it.
+ */
+const E2E_MODE = import.meta.env.MODE === "e2e";
+
 function iso(dayOffset: number, hour = 20): string {
   return new Date(BASE + dayOffset * DAY + (hour - 9) * 3_600_000).toISOString();
 }
@@ -43,8 +50,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Simulated latency; skipped in e2e so assertions do not wait on timers. */
+function delay(ms: number): Promise<void> {
+  return E2E_MODE ? Promise.resolve() : sleep(ms);
+}
+
 function latency(): Promise<void> {
-  return sleep(120 + Math.floor(Math.random() * 160));
+  return E2E_MODE ? Promise.resolve() : sleep(120 + Math.floor(Math.random() * 160));
 }
 
 function hash(value: string): number {
@@ -56,28 +68,44 @@ function hash(value: string): number {
   return Math.abs(h);
 }
 
+/** Deterministic Fisher-Yates; `Math.random` would make e2e flaky. */
+function seededShuffle<T>(items: T[], seed: number): T[] {
+  const copy = [...items];
+  let state = seed || 1;
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    const j = state % (i + 1);
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
 // --- accounts ---------------------------------------------------------
 
-let accounts: Account[] = [
-  {
-    account_id: "acc-1",
-    username: "student_a",
-    display_name: "陈同学",
-    school_name: "天学网实验中学",
-    active: true,
-    session_valid: true,
-    expires_at: iso(30),
-  },
-  {
-    account_id: "acc-2",
-    username: "student_b",
-    display_name: "林同学",
-    school_name: "天学网实验中学",
-    active: false,
-    session_valid: true,
-    expires_at: iso(12),
-  },
-];
+function seedAccounts(): Account[] {
+  return [
+    {
+      account_id: "acc-1",
+      username: "student_a",
+      display_name: "陈同学",
+      school_name: "天学网实验中学",
+      active: true,
+      session_valid: true,
+      expires_at: iso(30),
+    },
+    {
+      account_id: "acc-2",
+      username: "student_b",
+      display_name: "林同学",
+      school_name: "天学网实验中学",
+      active: false,
+      session_valid: true,
+      expires_at: iso(12),
+    },
+  ];
+}
+
+let accounts: Account[] = seedAccounts();
 
 // --- courses and jobs -------------------------------------------------
 
@@ -174,7 +202,7 @@ function buildJobs(): JobRow[] {
   );
 }
 
-const jobs = buildJobs();
+let jobs: JobRow[] = buildJobs();
 
 // --- books ------------------------------------------------------------
 
@@ -306,9 +334,11 @@ function buildAnswer(jobId: string, title: string): AnswerDocument {
 
 // --- correction -------------------------------------------------------
 
-let mockCorrectionRemaining = 12;
-let mockCorrectionDraws = 0;
-let mockDrawn: CorrectionQuestion[] = [];
+let correctionRemaining = 12;
+let correctionDraws = 0;
+let drawnQuestions: CorrectionQuestion[] = [];
+/** Full shelf override; `null` means "use the seeds". */
+let booksOverride: Book[] | null = null;
 
 const correctionSeeds: CorrectionQuestion[] = Array.from(
   { length: 6 },
@@ -363,7 +393,10 @@ function wordPkPreview(
       retryable: false,
     };
   }
-  const picked = [...pool].sort(() => Math.random() - 0.5).slice(0, total);
+  const picked = seededShuffle(pool, hash(`${jobId}:${score}:${total}`)).slice(
+    0,
+    total,
+  );
   return {
     job_id: jobId,
     title: job?.name ?? "单词 PK",
@@ -418,12 +451,14 @@ function readAloudTask(jobId: string): ReadAloudTask {
 
 // --- settings ---------------------------------------------------------
 
-let settings: Settings = {
+const DEFAULT_SETTINGS: Settings = {
   concurrency: 4,
   request_timeout_ms: 15_000,
   refresh_interval_sec: 300,
   keep_audio_files: true,
 };
+
+let settings: Settings = { ...DEFAULT_SETTINGS };
 
 // --- dispatcher -------------------------------------------------------
 
@@ -431,6 +466,11 @@ export async function handleMock(
   command: keyof CommandMap,
   args: unknown,
 ): Promise<unknown> {
+  const injected = takeFailure(command);
+  if (injected) {
+    throw injected;
+  }
+
   switch (command) {
     case "accounts_list": {
       await latency();
@@ -439,7 +479,7 @@ export async function handleMock(
 
     case "account_login": {
       const { username, password } = args as CommandMap["account_login"]["args"];
-      await sleep(420);
+      await delay(420);
       if (!username.trim() || !password) {
         throw { code: "auth_failed", message: "账号和密码不能为空", retryable: false };
       }
@@ -503,6 +543,9 @@ export async function handleMock(
 
     case "books_list": {
       await latency();
+      if (booksOverride) {
+        return booksOverride.map((book) => ({ ...book }));
+      }
       return books.map((book) => ({
         book_id: book.book_id,
         name: book.name,
@@ -584,7 +627,7 @@ export async function handleMock(
     }
 
     case "wordpk_submit": {
-      await sleep(620);
+      await delay(620);
       const { confirm_token } = args as CommandMap["wordpk_submit"]["args"];
       if (confirm_token !== "mock-wordpk-token") {
         throw {
@@ -611,7 +654,7 @@ export async function handleMock(
       if (!file_name.toLowerCase().endsWith(".mp3")) {
         throw { code: "invalid_input", message: "只接受 mp3 文件", retryable: false };
       }
-      await sleep(520);
+      await delay(520);
       const record_url = `https://mock.oss/${question_id}.mp3`;
       uploads.set(question_id, record_url);
       return {
@@ -625,7 +668,7 @@ export async function handleMock(
 
     case "readaloud_preview": {
       const { job_id, scores } = args as CommandMap["readaloud_preview"]["args"];
-      await sleep(420);
+      await delay(420);
       const task = readAloudTask(job_id);
       const slots = task.slots.map((slot) => {
         const score =
@@ -655,7 +698,7 @@ export async function handleMock(
 
     case "readaloud_submit": {
       const { confirm_token } = args as CommandMap["readaloud_submit"]["args"];
-      await sleep(700);
+      await delay(700);
       if (confirm_token !== "mock-readaloud-token") {
         throw {
           code: "confirmation_expired",
@@ -675,13 +718,13 @@ export async function handleMock(
     case "correction_overview": {
       await latency();
       return {
-        remaining_count: mockCorrectionRemaining,
+        remaining_count: correctionRemaining,
         corrected_count: 482,
         today_corrected_count: 3,
         groups: [
           {
             group_key: "mock-group-1",
-            remaining_count: mockCorrectionRemaining,
+            remaining_count: correctionRemaining,
             qtype_name: "填空题",
             knowledge_name: "--",
           },
@@ -692,7 +735,7 @@ export async function handleMock(
     case "correction_draw": {
       await latency();
       const { count } = args as CommandMap["correction_draw"]["args"];
-      if (mockCorrectionRemaining <= 0) {
+      if (correctionRemaining <= 0) {
         return {
           batch_id: "",
           path_prefix: "",
@@ -701,38 +744,38 @@ export async function handleMock(
           confirm_token: null,
         } satisfies CorrectionDraw;
       }
-      const questionCount = Math.min(Math.max(1, count), mockCorrectionRemaining);
-      mockDrawn = correctionSeeds.slice(0, questionCount).map((question, index) => ({
+      const questionCount = Math.min(Math.max(1, count), correctionRemaining);
+      drawnQuestions = correctionSeeds.slice(0, questionCount).map((question, index) => ({
         ...question,
-        question_id: `${question.question_id}-${mockCorrectionDraws}`,
+        question_id: `${question.question_id}-${correctionDraws}`,
         number: String(index + 1),
       }));
-      mockCorrectionDraws += 1;
+      correctionDraws += 1;
       return {
-        batch_id: `mock-batch-${mockCorrectionDraws}`,
+        batch_id: `mock-batch-${correctionDraws}`,
         path_prefix: "",
-        questions: mockDrawn,
-        total_score: mockDrawn.reduce((sum, question) => sum + question.score, 0),
+        questions: drawnQuestions,
+        total_score: drawnQuestions.reduce((sum, question) => sum + question.score, 0),
         confirm_token: "mock-correction-token",
       } satisfies CorrectionDraw;
     }
 
     case "correction_submit": {
       const { confirm_token } = args as CommandMap["correction_submit"]["args"];
-      if (confirm_token !== "mock-correction-token" || mockDrawn.length === 0) {
+      if (confirm_token !== "mock-correction-token" || drawnQuestions.length === 0) {
         throw {
           code: "confirmation_expired",
           message: "确认已过期或已使用，请重新抽题",
           retryable: false,
         };
       }
-      await sleep(360);
-      mockCorrectionRemaining = Math.max(
+      await delay(360);
+      correctionRemaining = Math.max(
         0,
-        mockCorrectionRemaining - mockDrawn.length,
+        correctionRemaining - drawnQuestions.length,
       );
-      const submitted = mockDrawn.length;
-      mockDrawn = [];
+      const submitted = drawnQuestions.length;
+      drawnQuestions = [];
       return {
         ok: true,
         message: `已提交 ${submitted} 道题，订单号 mock-batch`,
@@ -757,13 +800,13 @@ export async function handleMock(
 
     case "settings_update": {
       const { settings: next } = args as CommandMap["settings_update"]["args"];
-      await sleep(280);
+      await delay(280);
       settings = { ...next };
       return { ...settings };
     }
 
     case "cache_clear": {
-      await sleep(260);
+      await delay(260);
       return null;
     }
 
@@ -776,4 +819,133 @@ export async function handleMock(
       };
     }
   }
+}
+
+// --- e2e control surface ---------------------------------------------
+//
+// Compiled only into `vite build --mode e2e`. Tests use it to force error
+// states and empty shelves without reaching the real backend.
+
+export interface MockError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface MockBootstrap {
+  /** Replace the stored account list (an empty array shows first-run login). */
+  accounts?: Account[];
+  /** Replace the job list; an empty array exercises the empty state. */
+  jobs?: JobRow[];
+  /** Replace the shelf; an empty array exercises the empty state. */
+  books?: Book[];
+  settings?: Settings;
+  correctionRemaining?: number;
+  /** Commands that fail once, from the very first render. */
+  failOnStart?: Partial<Record<keyof CommandMap, MockError>>;
+  /**
+   * Commands that keep failing until `clearFailures()`. Queries retry once by
+   * default, so a single failure would be invisible; use this for error-state
+   * tests and clear it before asserting the retry path.
+   */
+  failAlways?: Partial<Record<keyof CommandMap, MockError>>;
+}
+
+export interface MockControl {
+  reset(options?: MockBootstrap): void;
+  failNext(command: keyof CommandMap, error?: Partial<MockError>): void;
+  clearFailures(): void;
+}
+
+declare global {
+  interface Window {
+    __mock?: MockControl;
+    __MOCK_BOOTSTRAP__?: MockBootstrap;
+  }
+}
+
+const injectedFailures = new Map<keyof CommandMap, MockError[]>();
+const persistentFailures = new Map<keyof CommandMap, MockError>();
+
+function takeFailure(command: keyof CommandMap): MockError | undefined {
+  return (
+    injectedFailures.get(command)?.shift() ?? persistentFailures.get(command)
+  );
+}
+
+function clearFailures(): void {
+  injectedFailures.clear();
+  persistentFailures.clear();
+}
+
+function seedDefaults(settings: Settings): Settings {
+  return { ...settings };
+}
+
+/** Restore every mutable value to its seed, then apply overrides. */
+export function resetMock(options?: MockBootstrap): void {
+  accounts = seedAccounts();
+  jobs = buildJobs();
+  booksOverride = null;
+  uploads.clear();
+  settings = seedDefaults(DEFAULT_SETTINGS);
+  correctionRemaining = 12;
+  correctionDraws = 0;
+  drawnQuestions = [];
+  clearFailures();
+  applyBootstrap(options);
+}
+
+function applyBootstrap(options?: MockBootstrap): void {
+  if (!options) return;
+  if (options.accounts) {
+    accounts = options.accounts.map((account) => ({ ...account }));
+  }
+  if (options.jobs) {
+    jobs = options.jobs.map((job) => ({ ...job }));
+  }
+  if (options.books) {
+    booksOverride = options.books.map((book) => ({ ...book }));
+  }
+  if (options.settings) {
+    settings = seedDefaults(options.settings);
+  }
+  if (typeof options.correctionRemaining === "number") {
+    correctionRemaining = options.correctionRemaining;
+  }
+  for (const [command, error] of Object.entries(options.failOnStart ?? {})) {
+    injectFailure(command as keyof CommandMap, error as MockError);
+  }
+  for (const [command, error] of Object.entries(options.failAlways ?? {})) {
+    persistentFailures.set(
+      command as keyof CommandMap,
+      normalizeError(error as MockError),
+    );
+  }
+}
+
+function normalizeError(error: Partial<MockError>): MockError {
+  return {
+    code: error.code ?? "network_error",
+    message: error.message ?? "模拟网络错误（e2e）",
+    retryable: error.retryable ?? true,
+  };
+}
+
+function injectFailure(
+  command: keyof CommandMap,
+  error: Partial<MockError> = {},
+): void {
+  const queue = injectedFailures.get(command) ?? [];
+  queue.push(normalizeError(error));
+  injectedFailures.set(command, queue);
+}
+
+if (E2E_MODE) {
+  applyBootstrap(window.__MOCK_BOOTSTRAP__);
+  window.__mock = {
+    reset: resetMock,
+    failNext: injectFailure,
+    clearFailures,
+  };
 }
