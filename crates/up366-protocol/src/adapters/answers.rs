@@ -95,10 +95,10 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/student/task/answer/detail/v2")
-                .body_contains("courseId=COURSE-1")
-                .body_contains("uid=39370562")
-                .body_contains("bookId=BOOK-1")
-                .body_contains("taskId=CONTENT-1");
+                .body_includes("courseId=COURSE-1")
+                .body_includes("uid=39370562")
+                .body_includes("bookId=BOOK-1")
+                .body_includes("taskId=CONTENT-1");
             then.status(200).json_body(ok(json!({
                 "paperInfo": { "paperData": "<paper/>" },
                 "userAnswer": { "score": 8 }
@@ -110,7 +110,7 @@ mod tests {
 
         assert_eq!(detail.paper_data(), Some("<paper/>"));
         assert_eq!(detail.score(), Some(8.0));
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -141,8 +141,8 @@ mod tests {
 
         assert_eq!(detail.paper_data(), Some("<v1/>"));
         assert_eq!(detail.mark_data(), Some("marks"));
-        v2.assert_hits(1);
-        v1.assert_hits(1);
+        v2.assert_calls(1);
+        v1.assert_calls(1);
     }
 
     #[tokio::test]
@@ -161,8 +161,8 @@ mod tests {
 
         let client = client(&server);
         answer_detail(&client, &params()).await.unwrap();
-        v2.assert_hits(1);
-        v1.assert_hits(1);
+        v2.assert_calls(1);
+        v1.assert_calls(1);
     }
 
     #[tokio::test]
@@ -181,8 +181,8 @@ mod tests {
 
         let client = client(&server);
         answer_detail(&client, &params()).await.unwrap();
-        v2.assert_hits(1);
-        v1.assert_hits(1);
+        v2.assert_calls(1);
+        v1.assert_calls(1);
     }
 
     #[tokio::test]
@@ -200,7 +200,7 @@ mod tests {
         let client = client(&server);
         let detail = paper_detail(&client, "PAPER-1").await.unwrap();
         assert_eq!(detail.as_str(), "<elements><element id=\"Q1\"/></elements>");
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -216,6 +216,6 @@ mod tests {
         let client = client(&server);
         let error = answer_detail(&client, &params()).await.unwrap_err();
         assert!(!error.to_string().is_empty());
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 }

@@ -201,7 +201,7 @@ mod tests {
         assert_eq!(books[0].cover(), Some("https://cdn/cover.jpg"));
         assert!(books[0].is_2025_reader());
         assert_eq!(books[0].raw["goodsId"], json!(99001));
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -232,7 +232,7 @@ mod tests {
         assert_eq!(books[0].1.raw["bookType"], json!(2));
         assert_eq!(books[2].0, "2");
         assert_eq!(books[2].1.id(), Some("B-1"));
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -241,9 +241,9 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/v2/book/info")
-                .body_contains("bookId=BOOK-2")
-                .body_contains("bookType=2")
-                .body_contains("originalBookId=");
+                .body_includes("bookId=BOOK-2")
+                .body_includes("bookType=2")
+                .body_includes("originalBookId=");
             then.status(200).json_body(ok(
                 json!({ "bookId": "BOOK-2", "bookName": "数学", "bookType": 2, "packType": 7 }),
             ));
@@ -254,7 +254,7 @@ mod tests {
         assert_eq!(book.book_type(), 2);
         assert_eq!(book.title(), "数学");
         assert!(!book.is_2025_reader());
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -263,9 +263,9 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/student/chapter-task-score/list")
-                .body_contains("courseId=COURSE-9")
-                .body_contains("bookId=BOOK-1")
-                .body_contains("uid=42");
+                .body_includes("courseId=COURSE-9")
+                .body_includes("bookId=BOOK-1")
+                .body_includes("uid=42");
             then.status(200).json_body(ok(json!([
                 { "cid": "C-1", "pid": "0", "nodeName": "Unit 1", "nodeType": 1 },
                 { "cid": "T-1", "pid": "C-1", "nodeName": "课文跟读", "nodeType": 2, "taskType": 1 },
@@ -284,7 +284,7 @@ mod tests {
         assert!(nodes[1].is_task());
         assert!(!nodes[1].is_word_task());
         assert!(nodes[2].is_word_task());
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -293,8 +293,8 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/question/student/task/question-score/list")
-                .body_contains("taskId=T-1")
-                .body_contains("uid=42");
+                .body_includes("taskId=T-1")
+                .body_includes("uid=42");
             then.status(200).json_body(ok(json!([
                 { "questionId": "Q-1", "questionNo": "1", "qstTypeName": "口语跟读",
                   "questionTypeNum": 9, "myAnswer": "https://cdn/a.mp3" },
@@ -312,7 +312,7 @@ mod tests {
         assert!(rows[0].is_read_aloud());
         assert_eq!(rows[0].my_answer, "https://cdn/a.mp3");
         assert!(!rows[1].is_read_aloud());
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -326,7 +326,7 @@ mod tests {
         let client = client(&server);
         assert!(book_plan(&client, "0", "BOOK-1").await.unwrap().is_empty());
         assert!(book_plan(&client, "-1", "BOOK-1").await.unwrap().is_empty());
-        mock.assert_hits(0);
+        mock.assert_calls(0);
     }
 
     #[tokio::test]
@@ -335,9 +335,9 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/book/plan")
-                .body_contains("courseId=9222783")
-                .body_contains("bookId=BOOK-1")
-                .body_contains("bookType=1");
+                .body_includes("courseId=9222783")
+                .body_includes("bookId=BOOK-1")
+                .body_includes("bookType=1");
             then.status(200).json_body(ok(json!([
                 { "chapterId": "C-1", "chapterName": "Unit 1", "isClose": 1 },
                 { "chapterId": "C-2", "chapterName": "Unit 2", "isClose": 0 }
@@ -350,6 +350,6 @@ mod tests {
         assert_eq!(plan.len(), 2);
         assert!(plan[0].is_closed());
         assert!(!plan[1].is_closed());
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 }

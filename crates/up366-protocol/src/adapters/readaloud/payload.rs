@@ -391,9 +391,9 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/task/score/submit/v2")
-                .body_contains("submitType=8")
-                .body_contains("tasksJson")
-                .body_contains("ut=");
+                .body_includes("submitType=8")
+                .body_includes("tasksJson")
+                .body_includes("ut=");
             then.status(200)
                 .json_body(ok(json!({"code": 0, "msg": "success"})));
         });
@@ -402,6 +402,6 @@ mod tests {
         submit_readaloud(&client(&server), &row, 1_700_000_000_000)
             .await
             .unwrap();
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 }

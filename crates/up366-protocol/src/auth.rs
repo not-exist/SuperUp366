@@ -148,7 +148,7 @@ mod tests {
                 .path("/v2/tickets-v3")
                 .header("clientid", "CID-TEST")
                 .header("u3t", "")
-                .body_contains(expected);
+                .body_includes(expected);
             then.status(200)
                 .header("set-cookie", "CASTGC=abc; Path=/")
                 .json_body(json!({
@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(client.tgt(), "TGT-9");
         assert_eq!(client.username(), "alice");
 
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -212,7 +212,7 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/v2/tickets-v3")
-                .body_contains(format!("password={expected_hash}"));
+                .body_includes(format!("password={expected_hash}"));
             then.status(200).json_body(json!({
                 "result": { "code": -26, "msg": "ok" },
                 "data": { "tgt": "TGT-9" }
@@ -224,6 +224,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(session.tgt, "TGT-9");
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 }
