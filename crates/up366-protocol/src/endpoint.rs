@@ -66,6 +66,7 @@ const STUDYTASK_API: &str = "https://studytask-api.up366.cn";
 const BOOK_API: &str = "https://book-api.up366.cn";
 const DSB_API: &str = "https://dsb-api.up366.cn";
 const QLIB_API: &str = "https://qlib-api.up366.cn";
+const XOT_API: &str = "https://xot-api.up366.cn";
 const WORDS_V2_API: &str = "https://words-v2-api.up366.cn";
 const WORDSBTL_API: &str = "https://wordsbtl-api.up366.cn";
 const STUDY_API: &str = "https://study-api.up366.cn";
@@ -161,6 +162,16 @@ pub const ENDPOINTS: &[Endpoint] = &[
         false,
         BodyKind::Form,
     ),
+    // The book tree. Course books (`bookType = 2`) only answer their pages
+    // when the assigning course is sent; a page's `id` is the assignment id
+    // and its `paperId` is what the textbook reader opens.
+    ep(
+        "book_tree",
+        BOOK_API,
+        "/client/books/tree",
+        false,
+        BodyKind::Form,
+    ),
     // The official book detail view: chapters and assignments with the
     // student's scores, and the per-task detail behind each row.
     ep(
@@ -205,6 +216,16 @@ pub const ENDPOINTS: &[Endpoint] = &[
         "/client/paper/detail",
         false,
         BodyKind::Query,
+    ),
+    // The course-book reader's paper source. The PC client never calls it for
+    // its shelf, but `textbook.html` does, and it is how a course-book page
+    // gets its paper without a scheduled job.
+    ep(
+        "textbook_paperinfo",
+        XOT_API,
+        "/client/textbook/paperinfo",
+        false,
+        BodyKind::Form,
     ),
     // --- word pk ------------------------------------------------------
     ep(

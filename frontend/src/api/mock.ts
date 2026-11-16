@@ -234,6 +234,15 @@ const bookSeeds: Book[] = [
     course_id: null,
     book_type: 1,
   },
+  {
+    book_id: "book-4",
+    name: "新概念英语1",
+    subject: "英语",
+    cover_url: null,
+    is_2025_reader: false,
+    course_id: "course-1",
+    book_type: 2,
+  },
 ];
 
 const bookChapterTitles = [
@@ -242,7 +251,12 @@ const bookChapterTitles = [
   "Unit 3 Sports and Fitness",
 ];
 
-function bookJob(bookId: string, chapterIndex: number, jobIndex: number): BookJob {
+function bookJob(
+  bookId: string,
+  bookType: number,
+  chapterIndex: number,
+  jobIndex: number,
+): BookJob {
   const seed = hash(`${bookId}-${chapterIndex}-${jobIndex}`);
   const statusKind = statusRotation[seed % statusRotation.length];
   const status = makeStatus(statusKind, seed);
@@ -254,9 +268,10 @@ function bookJob(bookId: string, chapterIndex: number, jobIndex: number): BookJo
     score: status.score ?? null,
     deadline: iso(statusKind === "finished" ? -2 : 3 + (seed % 6)),
     read_aloud: jobIndex === 1,
-    // The browser preview joins recording tasks to the seeded read-aloud job so
-    // the book entry can reach the same submission flow as the job list.
-    readaloud_job_id: jobIndex === 1 ? "job-1-9" : null,
+    // An ordinary book joins the recording task to the seeded read-aloud job.
+    // A class book's page has no job row; it uses the book read-aloud route.
+    readaloud_job_id: jobIndex === 1 && bookType !== 2 ? "job-1-9" : null,
+    readaloud_book: jobIndex === 1 && bookType === 2,
   };
 }
 
@@ -265,7 +280,7 @@ const books: BookDetail[] = bookSeeds.map((book, bookIndex) => {
     chapter_id: `${book.book_id}-ch-${chapterIndex + 1}`,
     title,
     jobs: Array.from({ length: 4 }, (_, jobIndex) =>
-      bookJob(book.book_id, chapterIndex, jobIndex),
+      bookJob(book.book_id, book.book_type, chapterIndex, jobIndex),
     ),
   }));
   const jobs = chapters.flatMap((chapter) => chapter.jobs);
@@ -275,7 +290,10 @@ const books: BookDetail[] = bookSeeds.map((book, bookIndex) => {
     subject: book.subject,
     cover_url: book.cover_url,
     is_2025_reader: book.is_2025_reader,
-    course_id: courseSeeds[bookIndex % courseSeeds.length].course_id,
+    // A class-assigned book keeps its seed course; purchased books fall back
+    // to a course because the detail endpoint needs one.
+    course_id:
+      book.course_id ?? courseSeeds[bookIndex % courseSeeds.length].course_id,
     progress: jobs.filter((job) => job.status.kind === "finished").length,
     total: jobs.length,
     teacher_name: courseSeeds[bookIndex % courseSeeds.length].teacher_name,
@@ -462,6 +480,63 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 let settings: Settings = { ...DEFAULT_SETTINGS };
+
+// --- read-aloud helpers ----------------------------------------------
+
+async function mockUpload(recording: {
+  question_id: string;
+  file_name: string;
+}): Promise<ReadAloudUpload> {
+  const { question_id, file_name } = recording;
+  if (!file_name.toLowerCase().endsWith(".mp3")) {
+    throw { code: "invalid_input", message: "只接受 mp3 文件", retryable: false };
+  }
+  await delay(520);
+  const record_url = `https://mock.oss/${question_id}.mp3`;
+  uploads.set(question_id, record_url);
+  return {
+    ok: true,
+    question_id,
+    file_name,
+    size: 1_024,
+    record_url,
+  } satisfies ReadAloudUpload;
+}
+
+function mockPreview(
+  taskId: string,
+  scores?: { question_id: string; score: number }[],
+): ReadAloudPreview {
+  const task = readAloudTask(taskId);
+  const slots = task.slots.map((slot) => {
+    const score =
+      scores?.find((entry) => entry.question_id === slot.question_id)?.score ??
+      slot.score;
+    return {
+      question_id: slot.question_id,
+      number: slot.number,
+      sentence: slot.sentence,
+      score,
+      record_url: slot.record_url ?? "",
+    };
+  });
+  if (slots.some((slot) => !slot.record_url)) {
+    throw { code: "invalid_input", message: "还有题目没有上传录音", retryable: false };
+  }
+  return {
+    job_id: taskId,
+    title: task.title,
+    total_score: task.total_score,
+    reported_score: slots.reduce((sum, slot) => sum + slot.score, 0),
+    // A book page has no job id, so its row carries an empty `studyTaskId`
+    // and `submitType = 0`, matching the reader's textbook branch.
+    row: taskId.startsWith("book-")
+      ? { studyTaskId: "", submitType: 0, qstJson: "" }
+      : { studyTaskId: taskId, qstJson: [] },
+    slots,
+    confirm_token: "mock-readaloud-token",
+  } satisfies ReadAloudPreview;
+}
 
 // --- dispatcher -------------------------------------------------------
 
@@ -653,50 +728,31 @@ export async function handleMock(
 
     case "readaloud_upload": {
       const { recording } = args as CommandMap["readaloud_upload"]["args"];
-      const { question_id, file_name } = recording;
-      if (!file_name.toLowerCase().endsWith(".mp3")) {
-        throw { code: "invalid_input", message: "只接受 mp3 文件", retryable: false };
-      }
-      await delay(520);
-      const record_url = `https://mock.oss/${question_id}.mp3`;
-      uploads.set(question_id, record_url);
-      return {
-        ok: true,
-        question_id,
-        file_name,
-        size: 1_024,
-        record_url,
-      } satisfies ReadAloudUpload;
+      return mockUpload(recording);
     }
 
     case "readaloud_preview": {
       const { job_id, scores } = args as CommandMap["readaloud_preview"]["args"];
       await delay(420);
-      const task = readAloudTask(job_id);
-      const slots = task.slots.map((slot) => {
-        const score =
-          scores?.find((entry) => entry.question_id === slot.question_id)?.score ??
-          slot.score;
-        return {
-          question_id: slot.question_id,
-          number: slot.number,
-          sentence: slot.sentence,
-          score,
-          record_url: slot.record_url ?? "",
-        };
-      });
-      if (slots.some((slot) => !slot.record_url)) {
-        throw { code: "invalid_input", message: "还有题目没有上传录音", retryable: false };
-      }
-      return {
-        job_id,
-        title: task.title,
-        total_score: task.total_score,
-        reported_score: slots.reduce((sum, slot) => sum + slot.score, 0),
-        row: { studyTaskId: job_id, qstJson: [] },
-        slots,
-        confirm_token: "mock-readaloud-token",
-      } satisfies ReadAloudPreview;
+      return mockPreview(job_id, scores);
+    }
+
+    case "book_readaloud_get": {
+      const { task_id } = args as CommandMap["book_readaloud_get"]["args"];
+      await latency();
+      return readAloudTask(task_id);
+    }
+
+    case "book_readaloud_upload": {
+      const { recording } = args as CommandMap["book_readaloud_upload"]["args"];
+      return mockUpload(recording);
+    }
+
+    case "book_readaloud_preview": {
+      const { task_id, scores } =
+        args as CommandMap["book_readaloud_preview"]["args"];
+      await delay(420);
+      return mockPreview(task_id, scores);
     }
 
     case "readaloud_submit": {

@@ -92,6 +92,15 @@ pub fn parse_paper(xml: &str, path_prefix: &str) -> Result<ReadAloudPaper> {
         if question.question_type.trim().is_empty() {
             continue;
         }
+        // `question_type = 99` is a composite group container: the course-book
+        // reader emits the group header as an `<element type="1">` followed by
+        // its sub-questions as `<element type="3">` siblings, each pointing
+        // back with `ref_question_id`. The group carries no answer of its own,
+        // so a paper whose group score is 70 plus one 30-point recording is
+        // still a read-aloud-only paper, not a mixed one.
+        if question.question_type.trim() == "99" {
+            continue;
+        }
         let Some(question_type) = recording_question_type(&question.question_type) else {
             non_read_aloud += 1;
             continue;
@@ -434,6 +443,26 @@ mod tests {
         </elements>"#;
         let paper = parse_paper(paper, "").unwrap();
         assert_eq!(paper.questions.len(), 1);
+        assert_eq!(paper.non_read_aloud, 0);
+        assert!(paper.require_all_read_aloud().is_ok());
+    }
+
+    #[test]
+    fn composite_group_headers_are_not_other_questions() {
+        let paper = r#"<elements>
+            <element type="0" id="1"><element_caption><![CDATA[课文听读]]></element_caption></element>
+            <element type="1" id="G1">
+                <is_group_text>1</is_group_text>
+                <group_score>70</group_score>
+                <question_type>99</question_type>
+            </element>
+            <element type="3" id="Q1"><question_type>9</question_type><question_score>10</question_score></element>
+            <element type="3" id="Q2"><question_type>9</question_type><question_score>30</question_score></element>
+        </elements>"#;
+        let paper = parse_paper(paper, "").unwrap();
+
+        assert_eq!(paper.questions.len(), 2);
+        assert_eq!(paper.questions[1].score, 30.0);
         assert_eq!(paper.non_read_aloud, 0);
         assert!(paper.require_all_read_aloud().is_ok());
     }

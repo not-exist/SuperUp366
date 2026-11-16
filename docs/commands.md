@@ -90,8 +90,15 @@ Each recording row also carries `readaloud_job_id`: when the same task appears
 in the account's job list, its `contentId` equals the book `cid`, and that job
 id (`studyTaskId`) is what the read-aloud page needs. The join runs against the
 cached job list and refreshes the catalog once if nothing is cached yet. A
-`null` `readaloud_job_id` means the task is not a scheduled job, so only the
-read-only view is offered instead of a submission that cannot be built.
+`null` `readaloud_job_id` means the task is not a scheduled job.
+
+A class-assigned course book (`bookType = 2`) has no job row for its pages at
+all, so the join is always `null`. Its recording rows also carry
+`readaloud_book = true`: the page is still submittable through the official
+reader's textbook branch, which uses the page/paper ids and an empty
+`studyTaskId`. The UI labels those rows `含朗读 · 可提交` and opens the book
+read-aloud route. Ordinary books (`bookType = 1`) keep the read-only view when
+the job join is missing.
 
 A book task id is not a job id, so it does not go through the job cache.
 `book_task_get` opens one row with the same `(courseId, bookId, taskId, uid)`
@@ -139,6 +146,9 @@ and the submit, taken from server time.
 | `readaloud_upload` | `account_id, job_id, recording{question_id, path, file_name}` | `ReadAloudUpload` (real OSS URL) |
 | `readaloud_preview` | `account_id, job_id, scores?[]` | `ReadAloudPreview` (row + `confirm_token`) |
 | `readaloud_submit` | `confirm_token` | `ReadAloudSubmit` |
+| `book_readaloud_get` | `account_id, book_id, book_type, course_id, task_id` | `ReadAloudTask` |
+| `book_readaloud_upload` | `account_id, book_id, task_id, recording{question_id, path, file_name}` | `ReadAloudUpload` |
+| `book_readaloud_preview` | `account_id, book_id, book_type, course_id, task_id, scores?[]` | `ReadAloudPreview` |
 
 `readaloud_get` reads `paperId` from the cached job (falling back to
 `job/info`) and parses `paperData`. Every recording question becomes one slot,
@@ -150,9 +160,17 @@ the book question rows report the same set as `questionTypeNum`. Group captions
 that mixes recording questions with other question types is still refused,
 because their submit shape is not confirmed.
 
-A book assignment opens this page from the book detail with `?back=` pointing
-at the book; the command arguments are unchanged because `book_detail` already
-resolved the real job id.
+A book assignment that is also a scheduled job opens this page from the book
+detail with `?back=` pointing at the book; the command arguments are unchanged
+because `book_detail` already resolved the real job id.
+
+The `book_readaloud_*` commands serve a class-book page that has no job. They
+read the page's `paperId` from `/client/books/tree` (the assigning `courseId` is
+required), fetch the paper from `xot-api /client/textbook/paperinfo`, and build
+the same view. Their submit row mirrors the reader's textbook branch: empty
+`studyTaskId`, `submitType = 0`, no `qstJson`, and `taskId = chapterId = page
+id`. Only `book_type = 2` is accepted; ordinary books submit through a
+different branch.
 
 `readaloud_upload` validates the mp3, uploads it to OSS with the STS
 credentials, and stores the resulting URL. Uploading again for the same
@@ -160,9 +178,11 @@ question replaces the previous file.
 
 `readaloud_preview` requires a recording for every slot, builds the exact
 `tasksJson` row (including `studyTaskId = jobId`, `qstJson` and
-`answerdata/markdatao`) and returns it with a single-use token.
+`answerdata/markdatao`) and returns it with a single-use token. A book-page
+preview stores the book/task ids in the token instead of a job id.
 `readaloud_submit` consumes the token, posts once to
-`/client/task/score/submit/v2`, then reads the finished-job list back.
+`/client/task/score/submit/v2`, then reads the completion list back: the
+finished-job list for a job, `/client/book/finished-task/list` for a book page.
 
 Expired jobs are not blocked: the server accepted a late submission during
 recon, so the UI only warns. The app has no vendor speech-scoring engine, so

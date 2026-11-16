@@ -85,9 +85,15 @@ export interface BookJob {
   /**
    * The job-list id when this book task is also a scheduled job. The read-aloud
    * page needs it because a book task id is not a job id; `null` means the task
-   * is only readable.
+   * is not a scheduled job.
    */
   readaloud_job_id: string | null;
+  /**
+   * A recording page of a class-assigned course book (`bookType = 2`). It has
+   * no job row but is still submittable through the reader's textbook branch,
+   * so the row opens the book read-aloud page instead of the read-only view.
+   */
+  readaloud_book: boolean;
 }
 
 export interface BookChapter {
@@ -267,6 +273,7 @@ export interface ReadAloudSlot {
 }
 
 export interface ReadAloudTask {
+  /** The id the page was opened with: a job id, or a book task id. */
   job_id: string;
   title: string;
   submitted: boolean;
@@ -296,6 +303,7 @@ export interface ReadAloudPreviewSlot {
 }
 
 export interface ReadAloudPreview {
+  /** The id the page was opened with: a job id, or a book task id. */
   job_id: string;
   title: string;
   total_score: number;
@@ -403,6 +411,36 @@ export interface CommandMap {
   readaloud_submit: {
     args: { confirm_token: string };
     result: ReadAloudSubmit;
+  };
+  book_readaloud_get: {
+    args: {
+      account_id: string;
+      book_id: string;
+      book_type: number;
+      course_id: string;
+      task_id: string;
+    };
+    result: ReadAloudTask;
+  };
+  book_readaloud_upload: {
+    args: {
+      account_id: string;
+      book_id: string;
+      task_id: string;
+      recording: { question_id: string; path: string; file_name: string };
+    };
+    result: ReadAloudUpload;
+  };
+  book_readaloud_preview: {
+    args: {
+      account_id: string;
+      book_id: string;
+      book_type: number;
+      course_id: string;
+      task_id: string;
+      scores?: { question_id: string; score: number }[];
+    };
+    result: ReadAloudPreview;
   };
 
   correction_overview: {

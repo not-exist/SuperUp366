@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::adapters::{decode_items, endpoint};
 use crate::client::Client;
 use crate::codec;
-use crate::dto::{self, Book, BookPlanEntry, BookQuestionRow, BookTaskNode, BookWordRow};
+use crate::dto::{self, Book, BookPage, BookPlanEntry, BookQuestionRow, BookTaskNode, BookWordRow};
 use crate::error::Result;
 
 /// `data` array from `/client/books/buy-book` (no request body).
@@ -60,6 +60,36 @@ pub async fn book_info(client: &Client, book_id: &str, book_type: i64) -> Result
         )
         .await?;
     dto::decode(codec::require_data(data, endpoint.name)?, endpoint.name)
+}
+
+/// Content pages from `/client/books/tree`.
+///
+/// A class-assigned course book (`bookType = 2`) keeps its assignments as
+/// content pages, and only this response carries each page's `paperId`. The
+/// assigning `courseId` is required: 新概念英语1 answers zero chapters and
+/// pages without it. The tree is large for a reader book, so callers should
+/// request it only when they need a page's paper.
+pub async fn book_tree_pages(
+    client: &Client,
+    course_id: &str,
+    book_id: &str,
+    book_type: i64,
+) -> Result<Vec<BookPage>> {
+    let endpoint = endpoint("book_tree")?;
+    let data = client
+        .call(
+            endpoint,
+            &[
+                ("bookId", json!(book_id)),
+                ("version", json!("")),
+                ("bookType", json!(book_type)),
+                ("courseId", json!(course_id)),
+            ],
+        )
+        .await?;
+    let mut object = codec::into_object(data, endpoint.name)?;
+    let items = codec::take_list(&mut object, "pages", endpoint.name)?;
+    decode_items(items, endpoint.name)
 }
 
 /// Chapters and assignments from `/client/student/chapter-task-score/list`.
@@ -312,6 +342,41 @@ mod tests {
         assert!(rows[0].is_read_aloud());
         assert_eq!(rows[0].my_answer, "https://cdn/a.mp3");
         assert!(!rows[1].is_read_aloud());
+        mock.assert_calls(1);
+    }
+
+    #[tokio::test]
+    async fn book_tree_pages_send_the_course_and_decode_paper_ids() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/client/books/tree")
+                .body_includes("bookId=BOOK-1")
+                .body_includes("bookType=2")
+                .body_includes("courseId=COURSE-9")
+                .body_includes("version=");
+            then.status(200).json_body(ok(json!({
+                "chapters": [],
+                "pages": [
+                    { "id": "P-1", "parentId": "C-1", "name": "课文听读",
+                      "paperId": "PAPER-1", "isContent": 1, "score": 100 },
+                    { "id": "P-2", "parentId": "C-1", "name": "目录",
+                      "isContent": 0 }
+                ]
+            })));
+        });
+
+        let client = client(&server);
+        let pages = book_tree_pages(&client, "COURSE-9", "BOOK-1", 2)
+            .await
+            .unwrap();
+
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0].id, "P-1");
+        assert_eq!(pages[0].paper_id.as_deref(), Some("PAPER-1"));
+        assert!(pages[0].is_content());
+        assert_eq!(pages[1].paper_id, None);
+        assert!(!pages[1].is_content());
         mock.assert_calls(1);
     }
 

@@ -22,8 +22,11 @@ use crate::endpoint::get;
 use crate::error::{ProtocolError, Result};
 use crate::signature::submit_task_ut;
 
-/// `submitType` the textbook read-aloud branch uses.
+/// `submitType` the textbook read-aloud branch uses for a scheduled job.
 pub const READALOUD_SUBMIT_TYPE: i64 = 8;
+/// `submitType` the course-book reader uses for a page with no job. The reader
+/// derives it as `studyTaskId ? 4 : 0`, and a class-book page has no job id.
+pub const BOOK_TASK_SUBMIT_TYPE: i64 = 0;
 const DEVICE_TYPE: &str = "Win10";
 
 /// One uploaded recording.
@@ -43,8 +46,9 @@ pub struct ReadAloudContext {
     pub book_id: String,
     /// `taskId` = `chapterId` = `contentId`.
     pub content_id: String,
-    /// `studyTaskId` must be this, not a generated id.
-    pub job_id: String,
+    /// The scheduled job id. `None` for a course-book page: the reader then
+    /// sends an empty `studyTaskId`, `submitType = 0` and no `qstJson`.
+    pub job_id: Option<String>,
     pub paper_id: String,
 }
 
@@ -193,7 +197,13 @@ pub fn build_row(
         0.0
     };
 
-    Ok(json!({
+    // The two submission sources carry different rows. A scheduled job sends
+    // its `studyTaskId`, the paper id, the per-question `qstJson` and the
+    // device fields (verified live); a course-book page mirrors the reader's
+    // "textbook" branch, which has no job row: empty `studyTaskId`,
+    // `submitType = 0`, no `qstJson`, and no job-only fields.
+    let job_id = context.job_id.as_deref();
+    let mut row = json!({
         "id": uuid::Uuid::new_v4().simple().to_string(),
         "taskId": context.content_id,
         "uid": context.uid,
@@ -209,18 +219,27 @@ pub fn build_row(
         "batchTag": uuid::Uuid::new_v4().simple().to_string(),
         "uploaded": 0,
         "msg": "",
-        "studyTaskId": context.job_id,
+        "studyTaskId": job_id.unwrap_or_default(),
         "courseId": context.course_id,
-        "paperId": context.paper_id,
         "extendParams": { "batchId": uuid::Uuid::new_v4().simple().to_string() },
-        "qstJson": qst_json,
         "failed": 0,
         "killStudyTask": 0,
-        "submitType": READALOUD_SUBMIT_TYPE,
-        "deviceType": DEVICE_TYPE,
-        "clientId": context.client_id,
-        "wrongnoteFlag": "PRODUCT",
-    }))
+        "submitType": if job_id.is_some() {
+            READALOUD_SUBMIT_TYPE
+        } else {
+            BOOK_TASK_SUBMIT_TYPE
+        },
+    });
+    if job_id.is_some() {
+        row["paperId"] = json!(context.paper_id);
+        row["qstJson"] = json!(qst_json);
+        row["deviceType"] = json!(DEVICE_TYPE);
+        row["clientId"] = json!(context.client_id);
+        row["wrongnoteFlag"] = json!("PRODUCT");
+    } else {
+        row["qstJson"] = json!("");
+    }
+    Ok(row)
 }
 
 /// Send one constructed row.
@@ -233,12 +252,18 @@ pub async fn submit_readaloud(client: &Client, row: &Value, timestamp_ms: u128) 
     let tasks_json = serde_json::to_string(&json!([row]))
         .map_err(|error| ProtocolError::Decode(format!("tasksJson: {error}")))?;
     let ut = submit_task_ut(&tasks_json, timestamp_ms);
+    // The form field must match the row: a course-book page submits type 0,
+    // a scheduled job type 8.
+    let submit_type = row
+        .get("submitType")
+        .and_then(Value::as_i64)
+        .unwrap_or(READALOUD_SUBMIT_TYPE);
     let data = client
         .call(
             endpoint,
             &[
                 ("tasksJson", json!(tasks_json)),
-                ("submitType", json!(READALOUD_SUBMIT_TYPE)),
+                ("submitType", json!(submit_type)),
                 ("ut", json!(ut)),
             ],
         )
@@ -315,7 +340,7 @@ mod tests {
             course_id: "9222783".to_owned(),
             book_id: "BOOK".to_owned(),
             content_id: "CONTENT".to_owned(),
-            job_id: "JOB".to_owned(),
+            job_id: Some("JOB".to_owned()),
             paper_id: "PAPER".to_owned(),
         }
     }
@@ -349,6 +374,29 @@ mod tests {
         assert!(
             marks.contains("<element id=\"Q1\"><mark_data><score>8.0</score><result>3</result>")
         );
+    }
+
+    #[test]
+    fn a_book_page_row_has_no_job_fields() {
+        let mut context = context();
+        context.job_id = None;
+        let row = build_row(
+            &paper(),
+            &context,
+            &recordings(),
+            &[8.0, 8.0],
+            1_793_714_405_924,
+            303,
+        )
+        .unwrap();
+
+        assert_eq!(row["studyTaskId"], "");
+        assert_eq!(row["submitType"], BOOK_TASK_SUBMIT_TYPE);
+        assert_eq!(row["qstJson"], "");
+        assert!(row.get("paperId").is_none());
+        assert!(row.get("clientId").is_none());
+        assert!(row.get("deviceType").is_none());
+        assert!(row.get("wrongnoteFlag").is_none());
     }
 
     #[test]

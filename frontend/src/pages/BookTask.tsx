@@ -15,6 +15,24 @@ import { useAccount } from "../hooks/account";
  * rows. The three cases are a vocabulary task, a paper with recordings, and an
  * ordinary paper.
  */
+/** The read-aloud route for one class-book page. */
+function readAloudPath(
+  bookId: string,
+  bookType: number,
+  courseId: string,
+  taskId: string,
+  name: string,
+  back: string,
+): string {
+  const params = new URLSearchParams({
+    type: String(bookType),
+    course: courseId,
+    name,
+    back,
+  });
+  return `/books/${bookId}/tasks/${taskId}/readaloud?${params.toString()}`;
+}
+
 export function BookTask() {
   const { bookId, taskId } = useParams();
   const [params] = useSearchParams();
@@ -77,7 +95,27 @@ export function BookTask() {
         <ErrorState error={task.error} onRetry={() => task.refetch()} />
       )}
 
-      {task.isSuccess && task.data.read_aloud && (
+      {task.isSuccess && task.data.read_aloud && bookType === 2 && (
+        <div className="banner banner--info" role="note">
+          <strong>可提交</strong>
+          <span>班级课本的朗读任务可以直接提交，不必先出现在作业列表中。</span>
+          <Link
+            className="button button--primary"
+            to={readAloudPath(
+              bookId ?? "",
+              bookType,
+              courseId ?? "",
+              taskId ?? "",
+              name,
+              back,
+            )}
+          >
+            去提交朗读
+          </Link>
+        </div>
+      )}
+
+      {task.isSuccess && task.data.read_aloud && bookType !== 2 && (
         <div className="banner banner--info" role="note">
           <strong>只读</strong>
           <span>

@@ -51,6 +51,10 @@ export default function App() {
           <Route path="books" element={<Books />} />
           <Route path="books/:bookId" element={<BookDetail />} />
           <Route path="books/:bookId/tasks/:taskId" element={<BookTask />} />
+          <Route
+            path="books/:bookId/tasks/:taskId/readaloud"
+            element={<ReadAloud />}
+          />
           <Route path="wrong-notes" element={<WrongNote />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/jobs" replace />} />
