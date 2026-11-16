@@ -14,10 +14,12 @@ pub mod readaloud;
 pub mod wordpk;
 pub mod words;
 
-pub use answers::{answer_detail, answer_detail_v1, answer_detail_v2, paper_detail};
+pub use answers::{
+    answer_detail, answer_detail_v1, answer_detail_v2, paper_detail, textbook_paperinfo,
+};
 pub use books::{
-    book_info, book_plan, book_task_nodes, book_task_questions, book_task_words, books,
-    course_books,
+    book_info, book_plan, book_task_nodes, book_task_questions, book_task_words, book_tree_pages,
+    books, course_books,
 };
 pub use catalog::{course_finished_jobs, courses, finished_tasks, job_info, jobs};
 pub use correction::{

@@ -70,9 +70,14 @@ pub struct BookJobView {
     /// A book task id is not a job id, and the read-aloud submit row needs
     /// `studyTaskId = jobId`; without this the recording page cannot be opened
     /// from the book view (it would look the book id up in the job cache and
-    /// fail). `None` means the task is not in the job list, so only the
-    /// read-only detail is available.
+    /// fail). `None` means the task is not in the job list. For a class-assigned
+    /// course book the page can still be submitted through the reader's
+    /// textbook branch, which `readaloud_book` advertises.
     pub readaloud_job_id: Option<String>,
+    /// A recording page of a course book (`bookType = 2`). Its paper comes
+    /// from the book tree and the submit row uses an empty `studyTaskId`, so
+    /// it is submittable even though it is not a scheduled job.
+    pub readaloud_book: bool,
 }
 
 /// One top-level chapter and every page below it.
@@ -195,7 +200,7 @@ pub async fn book_detail(
 
     let jobs = job_rows(&state, &account_id, &client).await?;
     let (chapters, progress, total) =
-        chapters_from_nodes(&nodes, &finished, &jobs, &book_id, &course_id);
+        chapters_from_nodes(&nodes, &finished, &jobs, &book_id, &course_id, book_type);
 
     Ok(BookDetailView {
         book_id: book.id().unwrap_or_default().to_owned(),
@@ -392,6 +397,7 @@ fn chapters_from_nodes(
     jobs: &[up366_store::JobRecord],
     book_id: &str,
     course_id: &str,
+    book_type: i64,
 ) -> (Vec<ChapterView>, usize, usize) {
     let parents: HashMap<&str, &str> = nodes
         .iter()
@@ -470,6 +476,7 @@ fn chapters_from_nodes(
             } else {
                 None
             },
+            readaloud_book: book_type == 2 && is_read_aloud_name(&node.node_name),
         });
     }
 
@@ -583,7 +590,7 @@ mod tests {
         let finished = finished(json!([{ "taskId": "TK1", "score": 88.5 }]));
         let jobs = vec![job_record("TK1", "JOB-1", "BOOK-1", "COURSE-1")];
         let (chapters, progress, total) =
-            chapters_from_nodes(&sample_nodes(), &finished, &jobs, "BOOK-1", "COURSE-1");
+            chapters_from_nodes(&sample_nodes(), &finished, &jobs, "BOOK-1", "COURSE-1", 1);
 
         assert_eq!((progress, total), (1, 2));
         let titles: Vec<_> = chapters.iter().map(|c| c.title.as_str()).collect();
@@ -596,6 +603,7 @@ mod tests {
         assert_eq!(recording.status, StatusView::Finished { score: Some(88.5) });
         assert_eq!(recording.score, Some(88.5));
         assert_eq!(recording.readaloud_job_id.as_deref(), Some("JOB-1"));
+        assert!(!recording.readaloud_book);
 
         let vocabulary = &chapters[1].jobs[0];
         assert_eq!(vocabulary.job_id, "TK2");
@@ -611,7 +619,7 @@ mod tests {
 
     #[test]
     fn an_empty_list_has_no_chapters() {
-        let (chapters, progress, total) = chapters_from_nodes(&[], &[], &[], "B", "C");
+        let (chapters, progress, total) = chapters_from_nodes(&[], &[], &[], "B", "C", 1);
         assert!(chapters.is_empty());
         assert_eq!((progress, total), (0, 0));
     }
@@ -626,11 +634,25 @@ mod tests {
             job_record("UNRELATED", "JOB-UNRELATED", "BOOK-1", "COURSE-1"),
         ];
         let (chapters, _, _) =
-            chapters_from_nodes(&sample_nodes(), &finished, &jobs, "BOOK-1", "COURSE-1");
+            chapters_from_nodes(&sample_nodes(), &finished, &jobs, "BOOK-1", "COURSE-1", 1);
         let recording = &chapters[0].jobs[0];
 
         assert_eq!(recording.job_id, "TK1");
         assert_eq!(recording.readaloud_job_id.as_deref(), Some("JOB-BEST"));
+        // An ordinary book's task is not a course-book page.
+        assert!(!recording.readaloud_book);
+    }
+
+    #[test]
+    fn a_course_book_recording_is_submittable_without_a_job() {
+        let finished = finished(json!([]));
+        let (chapters, _, _) =
+            chapters_from_nodes(&sample_nodes(), &finished, &[], "BOOK-1", "COURSE-1", 2);
+        let recording = &chapters[0].jobs[0];
+
+        assert!(recording.read_aloud);
+        assert_eq!(recording.readaloud_job_id, None);
+        assert!(recording.readaloud_book);
     }
 
     fn book(value: JsonValue) -> Book {

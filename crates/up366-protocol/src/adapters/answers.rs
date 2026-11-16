@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::adapters::endpoint;
 use crate::client::Client;
 use crate::codec;
-use crate::dto::{self, AnswerDetail, AnswerDetailParams, PaperDetail};
+use crate::dto::{self, AnswerDetail, AnswerDetailParams, PaperDetail, TextbookPaper};
 use crate::error::{ProtocolError, Result};
 
 /// Prefer the v2 answer-detail endpoint, falling back to v1 when the route or
@@ -62,6 +62,19 @@ pub async fn answer_detail_v1(
 /// GET `/client/paper/detail`, whose `data.paperData` is an XML string.
 pub async fn paper_detail(client: &Client, paper_id: &str) -> Result<PaperDetail> {
     let endpoint = endpoint("paper_detail")?;
+    let data = client
+        .call(endpoint, &[("paperId", json!(paper_id))])
+        .await?;
+    dto::decode(codec::require_data(data, endpoint.name)?, endpoint.name)
+}
+
+/// POST `/client/textbook/paperinfo`, the course-book reader's paper source.
+///
+/// The course-book reader (`textbook.html`) asks this endpoint with the page's
+/// `paperId`; the response carries the same `paperData` XML as
+/// `/client/paper/detail` plus an already absolute `pathPrefix`.
+pub async fn textbook_paperinfo(client: &Client, paper_id: &str) -> Result<TextbookPaper> {
+    let endpoint = endpoint("textbook_paperinfo")?;
     let data = client
         .call(endpoint, &[("paperId", json!(paper_id))])
         .await?;
@@ -217,5 +230,30 @@ mod tests {
         let error = answer_detail(&client, &params()).await.unwrap_err();
         assert!(!error.to_string().is_empty());
         mock.assert_calls(1);
+    }
+
+    #[tokio::test]
+    async fn textbook_paperinfo_posts_the_paper_id() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/client/textbook/paperinfo")
+                .body_contains("paperId=PAPER-1");
+            then.status(200).json_body(ok(json!({
+                "paperData": "<elements/>",
+                "answerData": "<elements/>",
+                "pathPrefix": "https://cdn.example",
+                "score": 100
+            })));
+        });
+
+        let paper = textbook_paperinfo(&client(&server), "PAPER-1")
+            .await
+            .unwrap();
+
+        assert_eq!(paper.paper_data, "<elements/>");
+        assert_eq!(paper.path_prefix(), "https://cdn.example");
+        assert_eq!(paper.score, Some(100.0));
+        mock.assert_hits(1);
     }
 }

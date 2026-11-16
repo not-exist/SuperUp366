@@ -49,6 +49,8 @@ URL once with `?ticket=<st>` (or `&ticket=` when a query already exists).
 | Course books | `course-api /client/student/course/list` (`data[].books`) |
 | Book info | `book-api /client/v2/book/info` |
 | Book tree | `book-api /client/books/tree` |
+| Book page list | `dsb-api /client/student/chapter-task-score/list` |
+| Textbook paper | `xot-api /client/textbook/paperinfo` |
 | Book plan | `studytask-api /client/book/plan` |
 | Answer detail v2 | `dsb-api /client/student/task/answer/detail/v2` |
 | Answer detail v1 | `dsb-api /client/student/task/answer/detail` (GET) |
@@ -178,6 +180,50 @@ including one expired job the server still accepted.
 - Completion is the `studyTaskId` appearing in
   `/client/student/all/course/finish/job/v2`; the server may asynchronously
   re-grade the recording, so the reported score is not final.
+
+## Course-book pages (新概念英语 and other class books)
+
+A class-assigned course book (`bookType = 2`) has assignments that are **not
+scheduled jobs**: `/client/student/course/job` contains no row for them, so a
+job-id join can never resolve. The official reader still submits them through
+`/client/task/score/submit/v2`, with a different row.
+
+- Book tree: `POST book-api /client/books/tree`
+  `{bookId, version:"", bookType:2, courseId}`. `data.pages[]` are the
+  assignments: `id` equals the `cid` of
+  `/client/student/chapter-task-score/list`, `paperId` opens the paper, and
+  `isContent = 1` marks an assignable page. **[S]** 新概念英语1
+  (`bookId=B8FB77D2AAAEE151EE2DA265EB9CA6D1`, `courseId=9222783`): 72 chapters,
+  144 content pages, 216 chapter-task nodes; every task `cid` matches a page
+  `id`.
+- Paper: `POST xot-api /client/textbook/paperinfo` `{paperId}` returns
+  `{paperData, answerData, pathPrefix, score, zipPath}`. `pathPrefix` is
+  already absolute. This is the source `textbook.html` uses, not
+  `/client/paper/detail`. **[S]** `paperId=C7C46EB9…` answered an 8-question
+  paper with `score=100`.
+- Submission row: the reader's `saveMarkData` passes
+  `{bookId, taskId, chapterId, courseId, studyTaskId, score, percent,
+  duration, userAnswerXmlStr, markDataXmlStr, submitType}` through the
+  `submitAnswerData(..., "textbook", ...)` bridge, and the main process's
+  textbook branch posts branch A with
+  `result = {studentid, testInfo:{answerdata, markdatao}}` and `qstJson=""`.
+  For a book page `studyTaskId` is empty, so the reader sets
+  `submitType = studyTaskId ? 4 : 0` — **0**, not 8. `taskId` and `chapterId`
+  are both the page id. **[R]** `textbook.<hash>.js`, main-window.js
+  `submitAnswerData`.
+- Completion: `/client/book/finished-task/list {bookId}` gains a row whose
+  `taskId` is the page id — the same id the book detail intersects for its
+  progress.
+- Composite papers: `question_type = 99` is a group header, not a question.
+  The reader emits it as an `<element type="1">` followed by its sub-questions
+  as flat `<element type="3">` siblings (`ref_question_id` points back). It
+  carries no answer and must be ignored when deciding whether a paper is
+  read-aloud-only: the Lesson 1 听读 paper (70-point group + 30-point
+  recording) is read-aloud-only. **[S]**
+
+The row above is read from the official reader bundle and the read-only probes
+are live; a live submission from this client has not been recorded yet (see
+`to-probe.md` §12).
 
 ## Error-notebook: correction
 

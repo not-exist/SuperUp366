@@ -47,6 +47,9 @@ pub fn app(state: AppState) -> tauri::Builder<tauri::Wry> {
             commands::readaloud::readaloud_upload,
             commands::readaloud::readaloud_preview,
             commands::readaloud::readaloud_submit,
+            commands::readaloud::book_readaloud_get,
+            commands::readaloud::book_readaloud_upload,
+            commands::readaloud::book_readaloud_preview,
         ])
 }
 

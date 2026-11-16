@@ -84,3 +84,18 @@ through the same `/client/task/score/submit/v2` row with their own
 `question_type` in `qstJson`. No live submission of a 12/13 paper has been
 observed yet, so a server-side rejection (or a different XML shape for those
 types) stays an open risk until one is recorded.
+
+## 12. Course-book page submission (live)
+
+Read from the official reader bundle and the PC main process: a class-book page
+submits through `/client/task/score/submit/v2` (branch A) with an empty
+`studyTaskId`, `submitType = 0`, no `qstJson`, `taskId = chapterId = page id`,
+and the answer XML in `result`. The book tree -> `paperId` ->
+`textbook/paperinfo` path is verified read-only (§ "Course-book pages" in
+`confirmed.md`), but no live submission from this client has been recorded.
+
+Resolve with one 新概念英语1 page chosen by the account owner: after the POST,
+`/client/book/finished-task/list?bookId=` must gain a row keyed by the page id
+and the book detail progress must move. If the server rejects the empty
+`studyTaskId`, the failure code is the deciding evidence — do not retry with a
+self-made id, which writes a score row nothing associates with the page.

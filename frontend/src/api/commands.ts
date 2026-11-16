@@ -91,6 +91,51 @@ export const api = {
   submitReadAloud: (confirmToken: string) =>
     invokeCommand("readaloud_submit", { confirm_token: confirmToken }),
 
+  getBookReadAloud: (
+    accountId: string,
+    bookId: string,
+    bookType: number,
+    courseId: string,
+    taskId: string,
+  ) =>
+    invokeCommand("book_readaloud_get", {
+      account_id: accountId,
+      book_id: bookId,
+      book_type: bookType,
+      course_id: courseId,
+      task_id: taskId,
+    }),
+  uploadBookRecording: (
+    accountId: string,
+    bookId: string,
+    taskId: string,
+    questionId: string,
+    path: string,
+    fileName: string,
+  ) =>
+    invokeCommand("book_readaloud_upload", {
+      account_id: accountId,
+      book_id: bookId,
+      task_id: taskId,
+      recording: { question_id: questionId, path, file_name: fileName },
+    }),
+  previewBookReadAloud: (
+    accountId: string,
+    bookId: string,
+    bookType: number,
+    courseId: string,
+    taskId: string,
+    scores: { question_id: string; score: number }[],
+  ) =>
+    invokeCommand("book_readaloud_preview", {
+      account_id: accountId,
+      book_id: bookId,
+      book_type: bookType,
+      course_id: courseId,
+      task_id: taskId,
+      scores,
+    }),
+
   getCorrectionOverview: (accountId: string) =>
     invokeCommand("correction_overview", { account_id: accountId }),
   drawCorrection: (accountId: string, count: number, groupKey?: string) =>

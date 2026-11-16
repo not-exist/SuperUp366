@@ -4,12 +4,15 @@ test.describe("书籍", () => {
   test("书架列出所有书籍", async ({ page }) => {
     await openRoute(page, "/books");
     await expect(page.getByTestId("book-grid")).toBeVisible();
-    await expect(page.locator('[data-testid^="book-card-"]')).toHaveCount(3);
+    await expect(page.locator('[data-testid^="book-card-"]')).toHaveCount(4);
     await expect(page.getByTestId("book-card-book-1")).toContainText(
       "英语必修 第一册",
     );
     await expect(page.getByTestId("book-card-book-3")).toContainText(
       "2025 阅读器",
+    );
+    await expect(page.getByTestId("book-card-book-4")).toContainText(
+      "新概念英语1",
     );
   });
 
@@ -53,6 +56,35 @@ test.describe("书籍", () => {
     await page.getByTestId("readaloud-preview").click();
     await page.getByTestId("confirm-submit").click();
     await expect(page.getByTestId("readaloud-result")).toContainText("提交成功");
+
+    await page.getByRole("link", { name: "返回书籍" }).click();
+    await expect(page.getByTestId("book-hero")).toBeVisible();
+  });
+
+  test("班级课本的朗读任务可以直接提交", async ({ page }) => {
+    await openRoute(page, "/books/book-4?type=2&course=course-1");
+    const row = page.getByTestId("book-job-book-4-c1-j2");
+    await expect(row).toContainText("含朗读 · 可提交");
+    await row.click();
+
+    await expect(page.getByTestId("readaloud-page")).toBeVisible();
+    for (let slot = 1; slot <= 5; slot += 1) {
+      const chooser = page.waitForEvent("filechooser");
+      await page.getByTestId(`readaloud-pick-${slot}`).click();
+      await (await chooser).setFiles(MP3);
+      await expect(
+        page.getByTestId(`readaloud-status-${slot}`),
+      ).toContainText("已上传");
+    }
+
+    await page.getByTestId("readaloud-preview").click();
+    await expect(page.getByTestId("confirm-dialog")).toContainText(
+      "确认提交朗读成绩",
+    );
+    await page.getByTestId("confirm-submit").click();
+    await expect(page.getByTestId("readaloud-result")).toContainText(
+      "提交成功",
+    );
 
     await page.getByRole("link", { name: "返回书籍" }).click();
     await expect(page.getByTestId("book-hero")).toBeVisible();

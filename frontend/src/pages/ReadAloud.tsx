@@ -78,7 +78,7 @@ async function pickMp3(): Promise<{ path: string; name: string } | null> {
 }
 
 export function ReadAloud() {
-  const { jobId } = useParams();
+  const { jobId, bookId, taskId } = useParams();
   const [params] = useSearchParams();
   const account = useAccount();
   const queryClient = useQueryClient();
@@ -87,16 +87,44 @@ export function ReadAloud() {
   const [preview, setPreview] = useState<ReadAloudPreview | null>(null);
   const [confirmed, setConfirmed] = useState<ReadAloudSubmit | null>(null);
 
+  // Two routes share this page: `/jobs/:jobId/readaloud` for a scheduled job,
+  // and `/books/:bookId/tasks/:taskId/readaloud` for a class-book page that is
+  // not a job. The latter submits through the reader's textbook branch.
+  const bookMode = Boolean(bookId && taskId);
+  const bookType = Number(params.get("type")) || 2;
+  const courseId = params.get("course") ?? "";
+  const bookName = params.get("name");
+  const hasTaskId = bookMode || Boolean(jobId);
+
   // A book assignment opens this page with `back` pointing at the book, so the
   // header does not throw the user back to the job list.
   const back = params.get("back");
-  const backTo = back && back.startsWith("/") ? back : "/jobs";
+  const backTo =
+    back && back.startsWith("/")
+      ? back
+      : bookMode
+        ? `/books/${bookId}?type=${bookType}${
+            courseId ? `&course=${encodeURIComponent(courseId)}` : ""
+          }`
+        : "/jobs";
   const backLabel = backTo.startsWith("/books") ? "返回书籍" : "返回作业";
 
+  const sourceKey = bookMode
+    ? `book:${bookId}:${courseId}:${taskId}`
+    : `job:${jobId}`;
   const task = useQuery({
-    queryKey: ["read-aloud", account.account_id, jobId],
-    queryFn: () => api.getReadAloud(account.account_id, jobId ?? ""),
-    enabled: Boolean(jobId),
+    queryKey: ["read-aloud", account.account_id, sourceKey],
+    queryFn: () =>
+      bookMode
+        ? api.getBookReadAloud(
+            account.account_id,
+            bookId ?? "",
+            bookType,
+            courseId,
+            taskId ?? "",
+          )
+        : api.getReadAloud(account.account_id, jobId ?? ""),
+    enabled: hasTaskId,
   });
 
   const slots = task.data?.slots ?? [];
@@ -133,13 +161,22 @@ export function ReadAloud() {
       [slot.question_id]: { status: "uploading", fileName: picked.name },
     }));
     try {
-      const result = await api.uploadRecording(
-        account.account_id,
-        jobId ?? "",
-        slot.question_id,
-        picked.path,
-        picked.name,
-      );
+      const result = bookMode
+        ? await api.uploadBookRecording(
+            account.account_id,
+            bookId ?? "",
+            taskId ?? "",
+            slot.question_id,
+            picked.path,
+            picked.name,
+          )
+        : await api.uploadRecording(
+            account.account_id,
+            jobId ?? "",
+            slot.question_id,
+            picked.path,
+            picked.name,
+          );
       setUploads((previous) => ({
         ...previous,
         [slot.question_id]: {
@@ -161,12 +198,22 @@ export function ReadAloud() {
   }
 
   const previewMutation = useMutation({
-    mutationFn: () =>
-      api.previewReadAloud(
-        account.account_id,
-        jobId ?? "",
-        slots.map((slot) => ({ question_id: slot.question_id, score: scoreFor(slot) })),
-      ),
+    mutationFn: () => {
+      const scoreRows = slots.map((slot) => ({
+        question_id: slot.question_id,
+        score: scoreFor(slot),
+      }));
+      return bookMode
+        ? api.previewBookReadAloud(
+            account.account_id,
+            bookId ?? "",
+            bookType,
+            courseId,
+            taskId ?? "",
+            scoreRows,
+          )
+        : api.previewReadAloud(account.account_id, jobId ?? "", scoreRows);
+    },
     onSuccess: (data) => setPreview(data),
   });
 
@@ -178,7 +225,7 @@ export function ReadAloud() {
       // The book view tracks the same task through finished-task/list, so a
       // submission made from a book must refresh its progress as well.
       void queryClient.invalidateQueries({
-        queryKey: ["read-aloud", account.account_id, jobId],
+        queryKey: ["read-aloud", account.account_id, sourceKey],
       });
       void queryClient.invalidateQueries({
         queryKey: ["book", account.account_id],
@@ -193,7 +240,9 @@ export function ReadAloud() {
     <div className="page" data-testid="readaloud-page">
       <header className="page-header">
         <div>
-          <h1 className="page-title">{task.data?.title ?? "朗读跟读"}</h1>
+          <h1 className="page-title">
+            {task.data?.title ?? bookName ?? "朗读跟读"}
+          </h1>
           <p className="page-subtitle">
             {task.data
               ? `自动识别：共 ${task.data.question_count} 题 / ${task.data.sentence_count} 句 / 满分 ${task.data.total_score}`
@@ -208,8 +257,10 @@ export function ReadAloud() {
         </div>
       </header>
 
-      {!jobId && <EmptyState title="缺少作业编号" description="请从作业列表重新进入。" />}
-      {task.isPending && Boolean(jobId) && <LoadingState label="正在解析题目…" />}
+      {!hasTaskId && (
+        <EmptyState title="缺少作业编号" description="请从作业或书籍列表重新进入。" />
+      )}
+      {task.isPending && hasTaskId && <LoadingState label="正在解析题目…" />}
       {task.isError && <ErrorState error={task.error} onRetry={() => task.refetch()} />}
 
       {task.data?.expired && !submitted && (

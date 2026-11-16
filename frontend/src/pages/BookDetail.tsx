@@ -115,12 +115,21 @@ export function BookDetail() {
 function bookKindLabel(job: BookJob): string | null {
   if (job.kind === "word_pk") return "单词 PK";
   if (job.read_aloud) {
-    return job.readaloud_job_id ? "含朗读 · 可提交" : "含朗读 · 只读";
+    return job.readaloud_job_id || job.readaloud_book
+      ? "含朗读 · 可提交"
+      : "含朗读 · 只读";
   }
   return null;
 }
 
-/** The page a book assignment opens: submission when the job is known. */
+/**
+ * The page a book assignment opens.
+ *
+ * A scheduled recording task is submitted through the job read-aloud page. A
+ * recording page of a class-assigned course book has no job row but is still
+ * submittable through the reader's textbook branch, so it opens the same UI on
+ * the book route with the page ids.
+ */
 function bookJobPath(
   bookId: string,
   bookType: number,
@@ -131,6 +140,15 @@ function bookJobPath(
   if (job.read_aloud && job.readaloud_job_id) {
     const back = encodeURIComponent(backPath);
     return `/jobs/${job.readaloud_job_id}/readaloud?back=${back}`;
+  }
+  if (job.read_aloud && job.readaloud_book) {
+    const params = new URLSearchParams({
+      type: String(bookType),
+      course: courseId,
+      name: job.name,
+      back: backPath,
+    });
+    return `/books/${bookId}/tasks/${job.job_id}/readaloud?${params.toString()}`;
   }
   return bookTaskPath(bookId, bookType, courseId, job);
 }

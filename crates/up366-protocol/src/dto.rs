@@ -499,6 +499,68 @@ pub struct FinishedTask {
     pub raw: Value,
 }
 
+/// One page of a book tree (`/client/books/tree`).
+///
+/// For a class-assigned course book (`bookType = 2`) the assignments are the
+/// content pages: `id` is the same `cid` that
+/// `/client/student/chapter-task-score/list` and `/client/book/finished-task/list`
+/// use, and `paperId` is what the textbook reader opens. Ordinary books expose
+/// their assignments as `tasks` (type 3) instead, so this DTO is only consumed
+/// for course books.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookPage {
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub id: String,
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub parent_id: String,
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub name: String,
+    #[serde(default, deserialize_with = "flex::opt_string")]
+    pub paper_id: Option<String>,
+    #[serde(default, rename = "isContent", deserialize_with = "flex::opt_i64")]
+    pub is_content: Option<i64>,
+    #[serde(default, deserialize_with = "flex::opt_f64")]
+    pub score: Option<f64>,
+    #[serde(default)]
+    pub raw: Value,
+}
+
+impl BookPage {
+    /// A content page is an assignable paper; navigation-only pages are not.
+    pub fn is_content(&self) -> bool {
+        self.is_content == Some(1)
+    }
+}
+
+/// The course-book reader's paper payload (`/client/textbook/paperinfo`).
+///
+/// `paperData` is the same XML the job answer view consumes, and `pathPrefix`
+/// is already absolute. `answerData` is the correct-answer XML the reader uses
+/// for its report; a submission only needs `paperData`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextbookPaper {
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub paper_data: String,
+    #[serde(default, deserialize_with = "flex::string_or_empty")]
+    pub answer_data: String,
+    #[serde(default, deserialize_with = "flex::opt_string")]
+    pub path_prefix: Option<String>,
+    #[serde(default, deserialize_with = "flex::opt_f64")]
+    pub score: Option<f64>,
+    #[serde(default, deserialize_with = "flex::opt_string")]
+    pub zip_path: Option<String>,
+    #[serde(default)]
+    pub raw: Value,
+}
+
+impl TextbookPaper {
+    pub fn path_prefix(&self) -> &str {
+        self.path_prefix.as_deref().unwrap_or("")
+    }
+}
+
 /// One node from `/client/student/chapter-task-score/list`.
 ///
 /// The endpoint returns the book's chapters (`nodeType = 1`) and assignments
@@ -987,6 +1049,8 @@ impl_raw!(
     JobInfo,
     FinishedJob,
     FinishedTask,
+    BookPage,
+    TextbookPaper,
     BookTaskNode,
     BookQuestionRow,
     BookWordRow,
