@@ -44,8 +44,8 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/sync/teaching/bucket/detail-info")
-                .body_contains("source=1")
-                .body_contains("bucketId=BUCKET-1");
+                .body_includes("source=1")
+                .body_includes("bucketId=BUCKET-1");
             then.status(200).json_body(ok(json!({
                 "contentList": [
                     { "entryList": [{ "entryId": 1 }, { "entryId": 2 }] },
@@ -60,6 +60,6 @@ mod tests {
         assert_eq!(words.len(), 3);
         assert_eq!(words[0].entry_id.as_deref(), Some("1"));
         assert_eq!(words[2].entry_id.as_deref(), Some("3"));
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 }

@@ -152,8 +152,8 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/course/list-of-student/v2")
-                .body_contains("status=1")
-                .body_contains("pager.pageSize=999");
+                .body_includes("status=1")
+                .body_includes("pager.pageSize=999");
             then.status(200).json_body(ok(json!({
                 "list": [{ "courseId": 9222783, "courseName": "2028届17班", "status": 1 }]
             })));
@@ -166,7 +166,7 @@ mod tests {
         assert_eq!(courses[0].id(), Some("9222783"));
         assert_eq!(courses[0].name(), "2028届17班");
         assert_eq!(courses[0].raw["status"], json!(1));
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -189,9 +189,9 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/student/course/job")
-                .body_contains("courseId=9222783")
-                .body_contains("pageIdFlag=1")
-                .body_contains("version=");
+                .body_includes("courseId=9222783")
+                .body_includes("pageIdFlag=1")
+                .body_includes("version=");
             then.status(200).json_body(ok(json!({
                 "allTaskList": [{
                     "jobId": "JOB-1",
@@ -212,7 +212,7 @@ mod tests {
         assert_eq!(jobs[0].task(), Some("CONTENT-1"));
         assert!(jobs[0].finished());
         assert_eq!(jobs[0].raw["jobId"], json!("JOB-1"));
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -221,10 +221,10 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/student/job/info")
-                .body_contains("jobId=JOB-1")
-                .body_contains("studyTaskId=JOB-1")
-                .body_contains("contentId=CONTENT-1")
-                .body_contains("bookId=BOOK-1");
+                .body_includes("jobId=JOB-1")
+                .body_includes("studyTaskId=JOB-1")
+                .body_includes("contentId=CONTENT-1")
+                .body_includes("bookId=BOOK-1");
             then.status(200).json_body(ok(json!({
                 "jobId": "JOB-1",
                 "paperId": "PAPER-1",
@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(info.id(), Some("JOB-1"));
         assert_eq!(info.paper_id.as_deref(), Some("PAPER-1"));
         assert!(info.finished());
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -249,7 +249,7 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/student/all/course/finish/job/v2")
-                .body_contains("courseId=9222783");
+                .body_includes("courseId=9222783");
             then.status(200).json_body(ok(json!({
                 "studyPlanList": [{ "studyPlanId": 1, "flevel": 0 }],
                 "finishedList": [{
@@ -279,7 +279,7 @@ mod tests {
         assert_eq!(rows.returned.len(), 1);
         assert_eq!(rows.returned[0].id(), Some("JOB-2"));
         assert_eq!(rows.returned[0].score, None);
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -288,7 +288,7 @@ mod tests {
         let plain = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/student/all/course/finish/job/v2")
-                .body_contains("courseId=2");
+                .body_includes("courseId=2");
             then.status(200).json_body(ok(json!([{
                 "studyTaskId": "JOB-2",
                 "score": 12
@@ -297,7 +297,7 @@ mod tests {
         let wrapped = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/student/all/course/finish/job/v2")
-                .body_contains("courseId=1");
+                .body_includes("courseId=1");
             then.status(200).json_body(ok(json!({
                 "allTaskList": [{ "jobId": "JOB-1", "jobName": "Done", "score": 90 }]
             })));
@@ -311,8 +311,8 @@ mod tests {
         let wrapped_rows = course_finished_jobs(&client, "1").await.unwrap();
         assert_eq!(wrapped_rows.finished[0].id(), Some("JOB-1"));
         assert_eq!(wrapped_rows.finished[0].score, Some(90.0));
-        plain.assert_hits(1);
-        wrapped.assert_hits(1);
+        plain.assert_calls(1);
+        wrapped.assert_calls(1);
     }
 
     #[tokio::test]
@@ -321,7 +321,7 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/book/finished-task/list")
-                .body_contains("bookId=BOOK-1");
+                .body_includes("bookId=BOOK-1");
             then.status(200).json_body(ok(json!([{
                 "taskId": "T-1",
                 "bookId": "BOOK-1",
@@ -334,7 +334,7 @@ mod tests {
         let empty = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/book/finished-task/list")
-                .body_contains("bookId=BOOK-EMPTY");
+                .body_includes("bookId=BOOK-EMPTY");
             then.status(200)
                 .json_body(json!({ "result": { "code": 0, "msg": "ok" } }));
         });
@@ -350,7 +350,7 @@ mod tests {
             .unwrap()
             .is_empty());
 
-        mock.assert_hits(1);
-        empty.assert_hits(1);
+        mock.assert_calls(1);
+        empty.assert_calls(1);
     }
 }

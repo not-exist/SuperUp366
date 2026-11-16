@@ -878,7 +878,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(data["got"], 1);
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[test]
@@ -964,8 +964,8 @@ mod tests {
                 .header("user-agent", USER_AGENT_VALUE)
                 .header("x-requested-with", "PC")
                 .header("x-app-name", "student-pc")
-                .body_contains("status=1")
-                .body_contains("pager.pageSize=999");
+                .body_includes("status=1")
+                .body_includes("pager.pageSize=999");
             then.status(200).json_body(ok(json!({ "list": [] })));
         });
 
@@ -979,7 +979,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(data, Some(json!({ "list": [] })));
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -994,7 +994,7 @@ mod tests {
         let error = client.call(get("courses").unwrap(), &[]).await.unwrap_err();
 
         assert!(matches!(error, ProtocolError::Http { status: 503, .. }));
-        mock.assert_hits(3);
+        mock.assert_calls(3);
     }
 
     #[tokio::test]
@@ -1012,7 +1012,7 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, ProtocolError::Http { status: 500, .. }));
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -1033,7 +1033,7 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -1073,14 +1073,14 @@ mod tests {
             .into_domain(),
             up366_core::DomainError::Duplicate
         ));
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     fn without_ticket(request: &HttpMockRequest) -> bool {
         !request
-            .query_params
-            .as_ref()
-            .is_some_and(|params| params.iter().any(|(key, _)| key == "ticket"))
+            .query_params()
+            .iter()
+            .any(|(key, _)| key == "ticket")
     }
 
     #[tokio::test]
@@ -1089,7 +1089,7 @@ mod tests {
         let first = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/course/list-of-student/v2")
-                .matches(without_ticket);
+                .is_true(without_ticket);
             then.status(200)
                 .json_body(json!({ "result": { "code": -21, "msg": "没有登录" } }));
         });
@@ -1111,9 +1111,9 @@ mod tests {
         let data = client.call(get("courses").unwrap(), &[]).await.unwrap();
 
         assert_eq!(data, Some(json!({ "list": [] })));
-        first.assert_hits(1);
-        replay.assert_hits(1);
-        ticket.assert_hits(1);
+        first.assert_calls(1);
+        replay.assert_calls(1);
+        ticket.assert_calls(1);
         assert!(!client.is_expired());
     }
 
@@ -1123,7 +1123,7 @@ mod tests {
         let first = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/course/list-of-student/v2")
-                .matches(without_ticket);
+                .is_true(without_ticket);
             then.status(200)
                 .json_body(json!({ "result": { "code": -22, "msg": "ticket invalid" } }));
         });
@@ -1136,7 +1136,7 @@ mod tests {
         let ticket = server.mock(|when, then| {
             when.method(POST)
                 .path("/v1/serviceTicket")
-                .body_contains("service=");
+                .body_includes("service=");
             then.status(200).json_body(json!({
                 "result": { "code": -24, "msg": "ok" },
                 "data": { "serverTicket": "ST-9" }
@@ -1146,9 +1146,9 @@ mod tests {
         let client = client(&server);
         client.call(get("courses").unwrap(), &[]).await.unwrap();
 
-        first.assert_hits(1);
-        replay.assert_hits(1);
-        ticket.assert_hits(1);
+        first.assert_calls(1);
+        replay.assert_calls(1);
+        ticket.assert_calls(1);
     }
 
     #[tokio::test]
@@ -1157,7 +1157,7 @@ mod tests {
         let first = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/course/list-of-student/v2")
-                .matches(without_ticket);
+                .is_true(without_ticket);
             then.status(200)
                 .json_body(json!({ "result": { "code": -21, "msg": "no login" } }));
         });
@@ -1180,9 +1180,9 @@ mod tests {
         let error = client.call(get("courses").unwrap(), &[]).await.unwrap_err();
 
         assert!(matches!(error, ProtocolError::Api { code: -21, .. }));
-        first.assert_hits(1);
-        replay.assert_hits(1);
-        ticket.assert_hits(1);
+        first.assert_calls(1);
+        replay.assert_calls(1);
+        ticket.assert_calls(1);
         assert!(client.is_expired());
     }
 
@@ -1192,7 +1192,7 @@ mod tests {
         server.mock(|when, then| {
             when.method(POST)
                 .path("/client/course/list-of-student/v2")
-                .matches(without_ticket);
+                .is_true(without_ticket);
             then.status(200)
                 .json_body(json!({ "result": { "code": -23, "msg": "找不到tgt" } }));
         });
@@ -1210,7 +1210,7 @@ mod tests {
         server.mock(|when, then| {
             when.method(POST)
                 .path("/client/course/list-of-student/v2")
-                .matches(without_ticket);
+                .is_true(without_ticket);
             then.status(200)
                 .json_body(json!({ "result": { "code": -21, "msg": "没有登录" } }));
         });

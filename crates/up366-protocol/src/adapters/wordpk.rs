@@ -228,7 +228,7 @@ mod tests {
 
         assert!(submit_word_pk(&client(&server), &round).await.is_err());
         // Nothing was sent: a mismatched score would corrupt the round.
-        mock.assert_hits(0);
+        mock.assert_calls(0);
     }
 
     #[tokio::test]
@@ -237,18 +237,18 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/wordsbtl/student/submit")
-                .body_contains("courseId=9222783")
-                .body_contains("studyTaskId=JOB-1")
-                .body_contains("roleName=Red")
-                .body_contains("roleType=0")
-                .body_contains("wrongLength=1")
-                .body_contains("score=1")
-                .body_contains("submitJson=");
+                .body_includes("courseId=9222783")
+                .body_includes("studyTaskId=JOB-1")
+                .body_includes("roleName=Red")
+                .body_includes("roleType=0")
+                .body_includes("wrongLength=1")
+                .body_includes("score=1")
+                .body_includes("submitJson=");
             then.status(200).json_body(ok(json!({"rc": 0})));
         });
 
         submit_word_pk(&client(&server), &round()).await.unwrap();
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     /// Sync helper for the non-async test above.

@@ -96,7 +96,7 @@ mod tests {
         assert_eq!(user.uid, "39370562");
         assert_eq!(user.realname, "张三");
         assert_eq!(user.school_id.as_deref(), Some("1001"));
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -127,6 +127,6 @@ mod tests {
             server_time(&client(&server)).await.unwrap(),
             1_762_000_000_000
         );
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 }

@@ -987,9 +987,9 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/personalmistake/overview")
-                .body_contains("\"studentId\":42")
-                .body_contains("\"organId\":3105")
-                .body_contains("\"stageId\":3");
+                .body_includes("\"studentId\":42")
+                .body_includes("\"organId\":3105")
+                .body_includes("\"stageId\":3");
             then.status(200).json_body(ok(json!({
                 "remainingCount": 257,
                 "correctedCount": 482,
@@ -1010,7 +1010,7 @@ mod tests {
         assert_eq!(overview.corrected_count, 482);
         assert_eq!(overview.group_list[0].question_type_name, "填空题");
         assert_eq!(overview.group_list[0].knowledge_point_name, "－");
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -1019,9 +1019,9 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/personalmistake/correction/draw")
-                .body_contains("studentId=42")
-                .body_contains("questionCount=5")
-                .body_contains("groupKey=G1");
+                .body_includes("studentId=42")
+                .body_includes("questionCount=5")
+                .body_includes("groupKey=G1");
             then.status(200).json_body(ok(json!({})));
         });
 
@@ -1029,7 +1029,7 @@ mod tests {
             .await
             .unwrap();
         assert!(result.is_none());
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
@@ -1038,8 +1038,8 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/personalmistake/correction/status")
-                .body_contains("batchId=B1")
-                .body_contains("uid=42");
+                .body_includes("batchId=B1")
+                .body_includes("uid=42");
             then.status(200).json_body(ok(json!({
                 "status": 1,
                 "percent": 50,
@@ -1053,7 +1053,7 @@ mod tests {
         assert_eq!(status.status, 1);
         assert_eq!(status.percent, 50.0);
         assert_eq!(status.submit_date, 123);
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[test]

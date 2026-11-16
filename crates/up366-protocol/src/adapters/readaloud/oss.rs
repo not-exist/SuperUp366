@@ -265,7 +265,7 @@ mod tests {
         assert_eq!(ticket.bucket, "up366-bucket1");
         assert_eq!(ticket.access_key_id, "A");
         assert_eq!(ticket.object_name, "storage/1/a.mp3");
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]
