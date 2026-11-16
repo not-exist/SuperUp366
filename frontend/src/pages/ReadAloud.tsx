@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/commands";
 import { isTauriRuntime } from "../api/invoke";
@@ -79,12 +79,19 @@ async function pickMp3(): Promise<{ path: string; name: string } | null> {
 
 export function ReadAloud() {
   const { jobId } = useParams();
+  const [params] = useSearchParams();
   const account = useAccount();
   const queryClient = useQueryClient();
   const [uploads, setUploads] = useState<Record<string, LocalUpload>>({});
   const [scores, setScores] = useState<Record<string, number>>({});
   const [preview, setPreview] = useState<ReadAloudPreview | null>(null);
   const [confirmed, setConfirmed] = useState<ReadAloudSubmit | null>(null);
+
+  // A book assignment opens this page with `back` pointing at the book, so the
+  // header does not throw the user back to the job list.
+  const back = params.get("back");
+  const backTo = back && back.startsWith("/") ? back : "/jobs";
+  const backLabel = backTo.startsWith("/books") ? "返回书籍" : "返回作业";
 
   const task = useQuery({
     queryKey: ["read-aloud", account.account_id, jobId],
@@ -168,8 +175,16 @@ export function ReadAloud() {
     onSuccess: (data) => {
       setConfirmed(data);
       setPreview(null);
+      // The book view tracks the same task through finished-task/list, so a
+      // submission made from a book must refresh its progress as well.
       void queryClient.invalidateQueries({
         queryKey: ["read-aloud", account.account_id, jobId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["book", account.account_id],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["jobs", account.account_id],
       });
     },
   });
@@ -186,9 +201,9 @@ export function ReadAloud() {
           </p>
         </div>
         <div className="page-actions">
-          <Link to="/jobs" className="button">
+          <Link to={backTo} className="button">
             <ArrowLeftIcon />
-            返回作业
+            {backLabel}
           </Link>
         </div>
       </header>
@@ -224,8 +239,8 @@ export function ReadAloud() {
 
       {task.isSuccess && slots.length === 0 && (
         <EmptyState
-          title="没有跟读题目"
-          description="该作业的题目包里没有 question_type = 9 的题目。"
+          title="没有录音题目"
+          description="该作业的题目包里没有 question_type 9/12/13 的跟读、问答或复述题。"
         />
       )}
 

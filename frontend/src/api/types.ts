@@ -74,6 +74,7 @@ export interface Book {
 }
 
 export interface BookJob {
+  /** The book task id (`cid`), also the key `finished-task/list` uses. */
   job_id: string;
   name: string;
   kind: JobKind;
@@ -81,6 +82,12 @@ export interface BookJob {
   score: number | null;
   deadline: string | null;
   read_aloud: boolean;
+  /**
+   * The job-list id when this book task is also a scheduled job. The read-aloud
+   * page needs it because a book task id is not a job id; `null` means the task
+   * is only readable.
+   */
+  readaloud_job_id: string | null;
 }
 
 export interface BookChapter {

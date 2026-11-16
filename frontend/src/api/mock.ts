@@ -254,6 +254,9 @@ function bookJob(bookId: string, chapterIndex: number, jobIndex: number): BookJo
     score: status.score ?? null,
     deadline: iso(statusKind === "finished" ? -2 : 3 + (seed % 6)),
     read_aloud: jobIndex === 1,
+    // The browser preview joins recording tasks to the seeded read-aloud job so
+    // the book entry can reach the same submission flow as the job list.
+    readaloud_job_id: jobIndex === 1 ? "job-1-9" : null,
   };
 }
 

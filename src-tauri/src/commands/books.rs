@@ -7,6 +7,12 @@
 //! intersection. `taskType = 2` marks a vocabulary assignment; every other
 //! row is an ordinary paper. Clicking a row opens its read-only detail, which
 //! the upstream endpoints can answer without a job row.
+//!
+//! A recording assignment is the exception: submitting it requires the job id
+//! (`studyTaskId`), which the book endpoints do not return. When the same task
+//! also appears in the account's job list, its `contentId` matches the book
+//! `cid`, so the detail view resolves and exposes that job id and the UI can
+//! open the read-aloud page instead of the read-only view.
 
 use std::collections::{HashMap, HashSet};
 
@@ -59,6 +65,14 @@ pub struct BookJobView {
     /// Book pages carry no deadline.
     pub deadline: Option<String>,
     pub read_aloud: bool,
+    /// The matching job-list id when this book task is also a scheduled job.
+    ///
+    /// A book task id is not a job id, and the read-aloud submit row needs
+    /// `studyTaskId = jobId`; without this the recording page cannot be opened
+    /// from the book view (it would look the book id up in the job cache and
+    /// fail). `None` means the task is not in the job list, so only the
+    /// read-only detail is available.
+    pub readaloud_job_id: Option<String>,
 }
 
 /// One top-level chapter and every page below it.
@@ -179,7 +193,9 @@ pub async fn book_detail(
         .await
         .map_err(|error| state.session_error(&account_id, &client, error))?;
 
-    let (chapters, progress, total) = chapters_from_nodes(&nodes, &finished);
+    let jobs = job_rows(&state, &account_id, &client).await?;
+    let (chapters, progress, total) =
+        chapters_from_nodes(&nodes, &finished, &jobs, &book_id, &course_id);
 
     Ok(BookDetailView {
         book_id: book.id().unwrap_or_default().to_owned(),
@@ -193,6 +209,40 @@ pub async fn book_detail(
         teacher_name: None,
         chapters,
     })
+}
+
+/// Cached job rows, refreshed once when the cache has never been filled.
+///
+/// A book is often opened before the job list has been fetched; the recording
+/// tasks still need their job ids, so one catalog refresh runs in that case.
+/// A failed refresh is not fatal here: the book detail is readable on its own
+/// and the rows simply stay read-only.
+async fn job_rows(
+    state: &AppState,
+    account_id: &up366_core::AccountId,
+    client: &up366_protocol::Client,
+) -> CommandResult<Vec<up366_store::JobRecord>> {
+    let cached = state
+        .db
+        .cache()
+        .jobs(account_id, None)
+        .await
+        .map_err(|error| AppError::new("storage_error", error.to_string()))?;
+    if !cached.is_empty() {
+        return Ok(cached);
+    }
+    if crate::commands::catalog::refresh_catalog(state, account_id, client)
+        .await
+        .is_ok()
+    {
+        return state
+            .db
+            .cache()
+            .jobs(account_id, None)
+            .await
+            .map_err(|error| AppError::new("storage_error", error.to_string()));
+    }
+    Ok(cached)
 }
 
 /// The course whose task list is read.
@@ -339,6 +389,9 @@ pub async fn book_task_get(
 fn chapters_from_nodes(
     nodes: &[BookTaskNode],
     finished: &[FinishedTask],
+    jobs: &[up366_store::JobRecord],
+    book_id: &str,
+    course_id: &str,
 ) -> (Vec<ChapterView>, usize, usize) {
     let parents: HashMap<&str, &str> = nodes
         .iter()
@@ -412,6 +465,11 @@ fn chapters_from_nodes(
             score: record.copied().flatten(),
             deadline: None,
             read_aloud: is_read_aloud_name(&node.node_name),
+            readaloud_job_id: if is_read_aloud_name(&node.node_name) {
+                matching_job_id(node, jobs, book_id, course_id)
+            } else {
+                None
+            },
         });
     }
 
@@ -419,11 +477,38 @@ fn chapters_from_nodes(
 }
 
 /// Book tasks name their recordings rather than carrying an open-type marker,
-/// so the title is the same kind of hint the job list uses.
+/// so the title is the same kind of hint the job list uses. `复述` is the
+/// `question_type = 13` retelling duty; `问答` is deliberately absent because
+/// ordinary reading papers use it too.
 fn is_read_aloud_name(name: &str) -> bool {
-    ["跟读", "朗读", "听读", "背诵"]
+    ["跟读", "朗读", "听读", "背诵", "复述"]
         .iter()
         .any(|needle| name.contains(needle))
+}
+
+/// The job whose `contentId` is this book task's `cid`.
+///
+/// Book and job endpoints describe the same task with different keys, so the
+/// content id is the join key. Several classes may carry the same job; prefer
+/// the row from this book and this course, then keep the upstream first.
+fn matching_job_id(
+    node: &BookTaskNode,
+    jobs: &[up366_store::JobRecord],
+    book_id: &str,
+    course_id: &str,
+) -> Option<String> {
+    let mut best: Option<(u8, &up366_store::JobRecord)> = None;
+    for job in jobs {
+        if job.content_id.as_deref() != Some(node.cid.as_str()) {
+            continue;
+        }
+        let score = u8::from(job.book_id.as_deref() == Some(book_id)) * 2
+            + u8::from(job.course_id.as_str() == course_id);
+        if best.is_none_or(|(current, _)| score > current) {
+            best = Some((score, job));
+        }
+    }
+    best.map(|(_, job)| job.job_id.as_str().to_owned())
 }
 
 /// Walk parent links until a chapter whose parent is not itself a chapter.
@@ -455,6 +540,26 @@ mod tests {
         serde_json::from_value(rows).unwrap()
     }
 
+    fn job_record(
+        content_id: &str,
+        job_id: &str,
+        book_id: &str,
+        course_id: &str,
+    ) -> up366_store::JobRecord {
+        up366_store::JobRecord {
+            course_id: up366_core::CourseId::from(course_id),
+            job_id: up366_core::JobId::from(job_id),
+            content_id: Some(content_id.to_owned()),
+            book_id: Some(book_id.to_owned()),
+            chapter_id: None,
+            paper_id: None,
+            name: "课文跟读".to_owned(),
+            order_index: 0,
+            raw_json: "{}".to_owned(),
+            fetched_at: 0,
+        }
+    }
+
     /// Two chapters, one nested chapter, a recording task, a vocabulary task
     /// and a layout node that is not an assignment.
     fn sample_nodes() -> Vec<BookTaskNode> {
@@ -476,7 +581,9 @@ mod tests {
     #[test]
     fn assignments_are_grouped_under_their_top_chapter_and_classified() {
         let finished = finished(json!([{ "taskId": "TK1", "score": 88.5 }]));
-        let (chapters, progress, total) = chapters_from_nodes(&sample_nodes(), &finished);
+        let jobs = vec![job_record("TK1", "JOB-1", "BOOK-1", "COURSE-1")];
+        let (chapters, progress, total) =
+            chapters_from_nodes(&sample_nodes(), &finished, &jobs, "BOOK-1", "COURSE-1");
 
         assert_eq!((progress, total), (1, 2));
         let titles: Vec<_> = chapters.iter().map(|c| c.title.as_str()).collect();
@@ -488,12 +595,15 @@ mod tests {
         assert!(recording.read_aloud);
         assert_eq!(recording.status, StatusView::Finished { score: Some(88.5) });
         assert_eq!(recording.score, Some(88.5));
+        assert_eq!(recording.readaloud_job_id.as_deref(), Some("JOB-1"));
 
         let vocabulary = &chapters[1].jobs[0];
         assert_eq!(vocabulary.job_id, "TK2");
         assert_eq!(vocabulary.kind, JobKind::WordPk);
         assert!(!vocabulary.read_aloud);
         assert_eq!(vocabulary.status, StatusView::Pending);
+        // A vocabulary task is not a recording duty, so it never carries one.
+        assert_eq!(vocabulary.readaloud_job_id, None);
 
         // A chapter with no assignments stays visible.
         assert!(chapters[2].jobs.is_empty());
@@ -501,9 +611,26 @@ mod tests {
 
     #[test]
     fn an_empty_list_has_no_chapters() {
-        let (chapters, progress, total) = chapters_from_nodes(&[], &[]);
+        let (chapters, progress, total) = chapters_from_nodes(&[], &[], &[], "B", "C");
         assert!(chapters.is_empty());
         assert_eq!((progress, total), (0, 0));
+    }
+
+    #[test]
+    fn the_recording_job_is_joined_on_the_content_id() {
+        let finished = finished(json!([]));
+        let jobs = vec![
+            job_record("TK1", "JOB-OTHER", "OTHER-BOOK", "OTHER-COURSE"),
+            job_record("TK1", "JOB-SAME-BOOK", "BOOK-1", "OTHER-COURSE"),
+            job_record("TK1", "JOB-BEST", "BOOK-1", "COURSE-1"),
+            job_record("UNRELATED", "JOB-UNRELATED", "BOOK-1", "COURSE-1"),
+        ];
+        let (chapters, _, _) =
+            chapters_from_nodes(&sample_nodes(), &finished, &jobs, "BOOK-1", "COURSE-1");
+        let recording = &chapters[0].jobs[0];
+
+        assert_eq!(recording.job_id, "TK1");
+        assert_eq!(recording.readaloud_job_id.as_deref(), Some("JOB-BEST"));
     }
 
     fn book(value: JsonValue) -> Book {

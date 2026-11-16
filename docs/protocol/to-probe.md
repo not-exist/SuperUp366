@@ -73,3 +73,14 @@ all verified on a real submission (see `confirmed.md`). Remaining unknowns:
 
 `/front/current-time` availability, response shape and acceptable skew, needed
 for the clock fields in submission payloads.
+
+## 11. Recording types 12 and 13
+
+`question_type = 9` (spoken follow-read) is confirmed end to end. Types `12`
+(spoken Q&A) and `13` (retelling) are **recognised** because the official client
+collects `urlList` entries for 9/12/13 and the book question rows report
+`questionTypeNum` 9/12/13 as recordings (**[R]**), and this client submits them
+through the same `/client/task/score/submit/v2` row with their own
+`question_type` in `qstJson`. No live submission of a 12/13 paper has been
+observed yet, so a server-side rejection (or a different XML shape for those
+types) stays an open risk until one is recorded.
