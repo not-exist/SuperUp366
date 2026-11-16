@@ -351,10 +351,10 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/books/tree")
-                .body_contains("bookId=BOOK-1")
-                .body_contains("bookType=2")
-                .body_contains("courseId=COURSE-9")
-                .body_contains("version=");
+                .body_includes("bookId=BOOK-1")
+                .body_includes("bookType=2")
+                .body_includes("courseId=COURSE-9")
+                .body_includes("version=");
             then.status(200).json_body(ok(json!({
                 "chapters": [],
                 "pages": [
@@ -377,7 +377,7 @@ mod tests {
         assert!(pages[0].is_content());
         assert_eq!(pages[1].paper_id, None);
         assert!(!pages[1].is_content());
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 
     #[tokio::test]

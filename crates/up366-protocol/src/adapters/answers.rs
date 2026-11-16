@@ -238,7 +238,7 @@ mod tests {
         let mock = server.mock(|when, then| {
             when.method(POST)
                 .path("/client/textbook/paperinfo")
-                .body_contains("paperId=PAPER-1");
+                .body_includes("paperId=PAPER-1");
             then.status(200).json_body(ok(json!({
                 "paperData": "<elements/>",
                 "answerData": "<elements/>",
@@ -254,6 +254,6 @@ mod tests {
         assert_eq!(paper.paper_data, "<elements/>");
         assert_eq!(paper.path_prefix(), "https://cdn.example");
         assert_eq!(paper.score, Some(100.0));
-        mock.assert_hits(1);
+        mock.assert_calls(1);
     }
 }
