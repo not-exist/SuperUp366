@@ -21,7 +21,7 @@ pub use books::{
     book_info, book_plan, book_task_nodes, book_task_questions, book_task_words, book_tree_pages,
     books, course_books,
 };
-pub use catalog::{course_finished_jobs, courses, finished_tasks, job_info, jobs};
+pub use catalog::{course_finished_jobs, courses, finished_tasks, history_jobs, job_info, jobs};
 pub use correction::{
     build_tasks_json, clear_wrong_notes, correction_draw, correction_overview, correction_status,
     mark_xml, qst_json, submit_correction, CorrectionAnswer, CorrectionContext, CorrectionGroup,

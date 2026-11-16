@@ -42,6 +42,7 @@ URL once with `?ticket=<st>` (or `&ticket=` when a query already exists).
 | Login | `sso /v2/tickets-v3` (success `code = -26`, `data.tgt`, `data.uType`) |
 | Courses | `course-api /client/course/list-of-student/v2` (`status=1`, `pager.pageSize=999`) |
 | Jobs | `studytask-api /client/student/course/job` (`data.allTaskList`) |
+| Job history | `studytask-api /client/student/all/course/range/job` (`data[]`) |
 | Job detail | `studytask-api /client/student/job/info` (`studyTaskId = jobId`) |
 | Finished/returned | `studytask-api /client/student/all/course/finish/job/v2` |
 | Finished scores | `dsb-api /client/book/finished-task/list` |
@@ -81,6 +82,24 @@ fields marks everything pending or expired. The authoritative rows come from
   for every course, so fetch it once per refresh.
 - `extParam.taskScore` is the paper's full score, not the student's score; only
   `finishedList[].score` may be shown as a result.
+
+### Historical jobs fall out of `course/job`
+
+`course/job` only returns live assignments; completed terms disappear from
+`data.allTaskList`. Verified 2026-11-16 on course `9073115`: `allTaskList` was
+empty while the account still had 142 finished rows in that course. The official
+H5 "历史" tab uses a range endpoint:
+
+- `POST studytask-api /client/student/all/course/range/job`
+  `{courseId, beginTime, endTime}` with `yyyy-MM-dd` dates.
+- `data` is a flat array of job rows shaped like `allTaskList` (including
+  `jobName`, `beginTime`, `endTime`, `courseId`, `extParam` and `jobScore`).
+- `courseId` is accepted but ignored: the call is account-wide. A single
+  `2000-01-01..today` range returned 779 rows across five courses for the
+  reference account.
+- Assignments whose `beginTime` is still in the future are omitted, so the live
+  `course/job` list is still required. Merge the two by `(courseId, jobId)`.
+- The official H5 history tab sorts by `beginTime` descending.
 
 ## Books
 

@@ -43,6 +43,34 @@ pub async fn jobs(client: &Client, course_id: &str) -> Result<Vec<Job>> {
         .collect::<Result<Vec<_>>>()
 }
 
+/// `data` from `/client/student/all/course/range/job`.
+///
+/// The official H5 uses this endpoint for its "history" tab. It returns a flat
+/// array of job rows in the same shape as `allTaskList`, including assignments
+/// that `course/job` has already dropped, for every course the student belongs
+/// to. `courseId` is accepted but ignored upstream, so callers should invoke it
+/// once per refresh with a wide date range.
+pub async fn history_jobs(
+    client: &Client,
+    course_id: Option<&str>,
+    begin_time: &str,
+    end_time: &str,
+) -> Result<Vec<Job>> {
+    let endpoint = endpoint("range_jobs")?;
+    let mut fields: Vec<(&str, Value)> = Vec::with_capacity(3);
+    if let Some(course_id) = course_id {
+        fields.push(("courseId", json!(course_id)));
+    }
+    fields.push(("beginTime", json!(begin_time)));
+    fields.push(("endTime", json!(end_time)));
+    let data = client.call(endpoint, &fields).await?;
+    let items = match data {
+        None => Vec::new(),
+        Some(data) => codec::into_array(Some(data), endpoint.name)?,
+    };
+    items.into_iter().map(Job::from_value).collect()
+}
+
 /// `data` from `/client/student/job/info`.
 pub async fn job_info(
     client: &Client,
@@ -212,6 +240,57 @@ mod tests {
         assert_eq!(jobs[0].task(), Some("CONTENT-1"));
         assert!(jobs[0].finished());
         assert_eq!(jobs[0].raw["jobId"], json!("JOB-1"));
+        mock.assert_calls(1);
+    }
+
+    #[tokio::test]
+    async fn history_jobs_posts_the_date_range_and_decodes_old_rows() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/client/student/all/course/range/job")
+                .body_includes("courseId=9073115")
+                .body_includes("beginTime=2000-01-01")
+                .body_includes("endTime=2026-11-16");
+            then.status(200).json_body(ok(json!([{
+                "jobId": "OLD-1",
+                "jobName": "2025 homework",
+                "courseId": 9073115,
+                "beginTime": "1756396800000",
+                "endTime": "1757433600000",
+                "extParam": "{\"bookId\":\"BOOK-OLD\",\"taskStatus\":1}"
+            }])));
+        });
+
+        let client = client(&server);
+        let jobs = history_jobs(&client, Some("9073115"), "2000-01-01", "2026-11-16")
+            .await
+            .unwrap();
+
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].id(), Some("OLD-1"));
+        assert_eq!(jobs[0].title(), "2025 homework");
+        assert_eq!(jobs[0].course(), Some("9073115"));
+        assert_eq!(jobs[0].book(), Some("BOOK-OLD"));
+        assert!(jobs[0].finished());
+        mock.assert_calls(1);
+    }
+
+    #[tokio::test]
+    async fn history_jobs_treats_missing_data_as_empty() {
+        let server = MockServer::start();
+        let mock = server.mock(|when, then| {
+            when.method(POST)
+                .path("/client/student/all/course/range/job");
+            then.status(200).json_body(ok(json!(null)));
+        });
+
+        let client = client(&server);
+        let jobs = history_jobs(&client, None, "2000-01-01", "2026-11-16")
+            .await
+            .unwrap();
+
+        assert!(jobs.is_empty());
         mock.assert_calls(1);
     }
 

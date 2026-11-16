@@ -39,6 +39,7 @@ up366-media.workspace = true
 
 [dev-dependencies]
 futures = "0.3"
+httpmock.workspace = true
 serial_test = "4"
 tokio.workspace = true
 tempfile.workspace = true

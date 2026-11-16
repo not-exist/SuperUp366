@@ -15,7 +15,7 @@ pub mod signature;
 pub use adapters::{
     answer_detail, answer_detail_v1, answer_detail_v2, book_info, book_plan, book_task_nodes,
     book_task_questions, book_task_words, books, bucket_words, course_finished_jobs, courses,
-    finished_tasks, job_info, jobs, paper_detail,
+    finished_tasks, history_jobs, job_info, jobs, paper_detail,
 };
 pub use auth::{login, login_with_salt, PasswordSalt};
 pub use client::{Client, ClientBuilder, CookieJar, DEFAULT_TIMEOUT, USER_AGENT_VALUE};
