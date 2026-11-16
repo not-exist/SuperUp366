@@ -85,7 +85,13 @@ chapter/assignment list the official reader uses. A row's `job_id` is the
 node's `cid` (a task `id` for ordinary books, a content page `id` for type-2
 course books), and `finished-task/list` still supplies the score.
 `taskType = 2` marks a vocabulary assignment (`kind = word_pk`); recording
-tasks are recognised from their title (跟读 / 朗读 / 听读 / 背诵).
+tasks are recognised from their title (跟读 / 朗读 / 听读 / 背诵 / 复述).
+Each recording row also carries `readaloud_job_id`: when the same task appears
+in the account's job list, its `contentId` equals the book `cid`, and that job
+id (`studyTaskId`) is what the read-aloud page needs. The join runs against the
+cached job list and refreshes the catalog once if nothing is cached yet. A
+`null` `readaloud_job_id` means the task is not a scheduled job, so only the
+read-only view is offered instead of a submission that cannot be built.
 
 A book task id is not a job id, so it does not go through the job cache.
 `book_task_get` opens one row with the same `(courseId, bookId, taskId, uid)`
@@ -135,9 +141,18 @@ and the submit, taken from server time.
 | `readaloud_submit` | `confirm_token` | `ReadAloudSubmit` |
 
 `readaloud_get` reads `paperId` from the cached job (falling back to
-`job/info`) and parses `paperData`. Every `question_type = 9` element becomes
-one slot, so the question/sentence counts are detected, never guessed. A paper
-that mixes read-aloud with other question types is refused.
+`job/info`) and parses `paperData`. Every recording question becomes one slot,
+so the question/sentence counts are detected, never guessed. Recording types are
+`question_type = 9` (spoken follow-read), `12` (spoken Q&A) and `13`
+(retelling); the official reader submits all three through the same branch and
+the book question rows report the same set as `questionTypeNum`. Group captions
+(`<element type="0">`, no `question_type`) are layout, not questions. A paper
+that mixes recording questions with other question types is still refused,
+because their submit shape is not confirmed.
+
+A book assignment opens this page from the book detail with `?back=` pointing
+at the book; the command arguments are unchanged because `book_detail` already
+resolved the real job id.
 
 `readaloud_upload` validates the mp3, uploads it to OSS with the STS
 credentials, and stores the resulting URL. Uploading again for the same

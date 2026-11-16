@@ -328,12 +328,16 @@ impl Job {
 
     /// Cheap hint that a job contains read-aloud questions.
     ///
-    /// The authoritative answer needs the paper (`question_type = 9`); this
+    /// The authoritative answer needs the paper (`question_type` 9/12/13); this
     /// only decides whether the UI offers the read-aloud page. Upstream names
-    /// such duties ".../逐句跟读" or ".../朗读".
+    /// such duties ".../逐句跟读", ".../朗读", ".../听读", ".../背诵" or
+    /// ".../复述"; the same title hints drive the book assignment list.
     pub fn is_read_aloud_hint(&self) -> bool {
         let title = self.title();
-        if title.contains("跟读") || title.contains("朗读") {
+        if ["跟读", "朗读", "听读", "背诵", "复述"]
+            .iter()
+            .any(|needle| title.contains(needle))
+        {
             return true;
         }
         self.ext_param
@@ -1048,6 +1052,14 @@ mod tests {
         }))
         .unwrap();
         assert!(by_open_type.is_read_aloud_hint());
+
+        let retelling = Job::from_value(json!({
+            "jobId": "JOB-6",
+            "jobName": "Unit 5/课文2/复述",
+            "extParam": {}
+        }))
+        .unwrap();
+        assert!(retelling.is_read_aloud_hint());
 
         let ordinary = Job::from_value(json!({
             "jobId": "JOB-5",

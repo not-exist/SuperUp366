@@ -114,13 +114,32 @@ export function BookDetail() {
 /** The same three cases the job list uses: word PK, read-aloud, ordinary. */
 function bookKindLabel(job: BookJob): string | null {
   if (job.kind === "word_pk") return "单词 PK";
-  if (job.read_aloud) return "含朗读";
+  if (job.read_aloud) {
+    return job.readaloud_job_id ? "含朗读 · 可提交" : "含朗读 · 只读";
+  }
   return null;
 }
 
+/** The page a book assignment opens: submission when the job is known. */
+function bookJobPath(
+  bookId: string,
+  bookType: number,
+  courseId: string,
+  job: BookJob,
+  backPath: string,
+): string {
+  if (job.read_aloud && job.readaloud_job_id) {
+    const back = encodeURIComponent(backPath);
+    return `/jobs/${job.readaloud_job_id}/readaloud?back=${back}`;
+  }
+  return bookTaskPath(bookId, bookType, courseId, job);
+}
+
 /**
- * One top-level chapter. A book task id is not a job id, so each row opens the
- * read-only book-task view instead of the job routes.
+ * One top-level chapter. A book task id is not a job id, so most rows open the
+ * read-only book-task view. A recording task that the job list also carries
+ * opens the read-aloud page with its real job id, which is what submission
+ * needs.
  */
 function ChapterSection({
   chapter,
@@ -136,6 +155,9 @@ function ChapterSection({
   const [limit, setLimit] = useState(CHAPTER_PAGE_SIZE);
   const jobs = chapter.jobs ?? [];
   const visible = jobs.slice(0, limit);
+  const backPath =
+    `/books/${bookId}?type=${bookType}` +
+    (courseId ? `&course=${encodeURIComponent(courseId)}` : "");
 
   return (
     <section className="chapter" data-testid="chapter">
@@ -158,7 +180,7 @@ function ChapterSection({
               <Link
                 key={job.job_id}
                 data-testid={`book-job-${job.job_id}`}
-                to={bookTaskPath(bookId, bookType, courseId, job)}
+                to={bookJobPath(bookId, bookType, courseId, job, backPath)}
                 className="job-row job-row--book"
               >
                 <span className="job-name">

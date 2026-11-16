@@ -1,16 +1,21 @@
 //! Paper XML parsing for read-aloud tasks.
 //!
 //! The paper detail (`/client/paper/detail`) returns `paperData`, an XML
-//! document whose `<element>` nodes are questions. A read-aloud question is
-//! marked `<question_type>9</question_type>` and carries its source sentences
-//! in `<attachment>`, which is URL-encoded XML:
+//! document whose `<element>` nodes are questions. A recording question is
+//! marked with a `<question_type>` of `9`, `12` or `13` and carries its source
+//! sentences in `<attachment>`, which is URL-encoded XML:
 //!
 //! ```text
 //! <sentences id="1"><content><![CDATA[First sentence.]]></content></sentences>
 //! ```
 //!
+//! `9` is spoken follow-read, `12` spoken Q&A and `13` retelling. The reader
+//! submits all three through the same recording branch (its `urlList` collects
+//! exactly `9/12/13` when a `record_url` exists), and the book question rows
+//! report the same set in `questionTypeNum`.
+//!
 //! The recording unit is the **question**, not the sentence: one mp3 per
-//! `question_type = 9` element, no matter how many sentences it contains.
+//! recording element, no matter how many sentences it contains.
 
 use percent_encoding::percent_decode_str;
 use quick_xml::events::{BytesStart, Event};
@@ -18,10 +23,19 @@ use quick_xml::{Reader, XmlVersion};
 
 use crate::error::{ProtocolError, Result};
 
+/// Question types the reader renders as recordings.
+///
+/// `9` = spoken follow-read, `12` = spoken Q&A, `13` = retelling. The official
+/// client collects `urlList` entries only for these types, so this client
+/// treats all three as one recording slot each.
+pub const RECORDING_QUESTION_TYPES: [i64; 3] = [9, 12, 13];
+
 /// One read-aloud question.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PaperQuestion {
     pub question_id: String,
+    /// Upstream `question_type`: one of [`RECORDING_QUESTION_TYPES`].
+    pub question_type: i64,
     /// Position among read-aloud questions, starting at 1.
     pub number: usize,
     pub score: f64,
@@ -48,7 +62,7 @@ impl ReadAloudPaper {
     pub fn require_all_read_aloud(&self) -> Result<()> {
         if self.questions.is_empty() {
             return Err(ProtocolError::Invalid(
-                "paper has no read-aloud questions (question_type = 9)".to_owned(),
+                "paper has no recording questions (question_type 9/12/13)".to_owned(),
             ));
         }
         if self.non_read_aloud > 0 {
@@ -78,12 +92,13 @@ pub fn parse_paper(xml: &str, path_prefix: &str) -> Result<ReadAloudPaper> {
         if question.question_type.trim().is_empty() {
             continue;
         }
-        if question.question_type.trim() != "9" {
+        let Some(question_type) = recording_question_type(&question.question_type) else {
             non_read_aloud += 1;
             continue;
-        }
+        };
         let mut question = PaperQuestion {
             question_id: question.question_id,
+            question_type,
             number: questions.len() + 1,
             score: question.score,
             duration: question.duration,
@@ -104,6 +119,12 @@ pub fn parse_paper(xml: &str, path_prefix: &str) -> Result<ReadAloudPaper> {
         sentence_count,
         total_score,
     })
+}
+
+/// The numeric type when it is one of [`RECORDING_QUESTION_TYPES`].
+fn recording_question_type(text: &str) -> Option<i64> {
+    let value: i64 = text.trim().parse().ok()?;
+    RECORDING_QUESTION_TYPES.contains(&value).then_some(value)
 }
 
 #[derive(Debug, Default)]
@@ -388,6 +409,7 @@ mod tests {
         assert_eq!(paper.total_score, 20.0);
         assert_eq!(paper.non_read_aloud, 0);
         assert_eq!(paper.questions[0].question_id, "Q1");
+        assert_eq!(paper.questions[0].question_type, 9);
         assert_eq!(paper.questions[0].number, 1);
         assert_eq!(paper.questions[0].duration, 82);
         assert_eq!(
@@ -413,6 +435,22 @@ mod tests {
         let paper = parse_paper(paper, "").unwrap();
         assert_eq!(paper.questions.len(), 1);
         assert_eq!(paper.non_read_aloud, 0);
+        assert!(paper.require_all_read_aloud().is_ok());
+    }
+
+    #[test]
+    fn spoken_qa_and_retelling_are_recording_questions_too() {
+        let paper = r#"<elements>
+            <element id='Q9' type='3'><question_type>9</question_type><question_score>10</question_score></element>
+            <element id='Q12' type='3'><question_type>12</question_type><question_score>10</question_score></element>
+            <element id='Q13' type='3'><question_type> 13 </question_type><question_score>10</question_score></element>
+        </elements>"#;
+        let paper = parse_paper(paper, "").unwrap();
+
+        assert_eq!(paper.questions.len(), 3);
+        assert_eq!(paper.non_read_aloud, 0);
+        let types: Vec<_> = paper.questions.iter().map(|q| q.question_type).collect();
+        assert_eq!(types, vec![9, 12, 13]);
         assert!(paper.require_all_read_aloud().is_ok());
     }
 

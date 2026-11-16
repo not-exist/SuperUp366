@@ -148,8 +148,12 @@ the job's `contentId`; passing `jobId` yields empty `paperInfo`. v2 requires
 Verified against two live homework submissions (2026-11-03 and 2026-11-09),
 including one expired job the server still accepted.
 
-- Question type marker: `question_type = 9`; one recording per **question**,
-  not per sentence. The paper's `<attachment>` holds the sentences.
+- Question type markers: `question_type` `9` (spoken follow-read), `12`
+  (spoken Q&A) and `13` (retelling) are all recordings; one recording per
+  **question**, not per sentence. The client collects `urlList` entries only
+  for these three types, and the book question rows report `questionTypeNum`
+  9/12/13 as recordings. **[R]** `recon/readaloud-complete.md` §4.5. The
+  paper's `<attachment>` holds the sentences.
 - `<element type="0">` nodes are group captions (`<element_caption>`), not
   questions: they carry no `question_type` and must be ignored when deciding
   whether a paper is read-aloud-only.

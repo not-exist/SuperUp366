@@ -77,6 +77,15 @@ export function BookTask() {
         <ErrorState error={task.error} onRetry={() => task.refetch()} />
       )}
 
+      {task.isSuccess && task.data.read_aloud && (
+        <div className="banner banner--info" role="note">
+          <strong>只读</strong>
+          <span>
+            该书本任务不在作业列表中，找不到提交所需的作业编号；这里只展示已提交的录音。
+          </span>
+        </div>
+      )}
+
       {task.isSuccess && task.data.words.length > 0 && (
         <div className="word-grid">
           {task.data.words.map((word) => (

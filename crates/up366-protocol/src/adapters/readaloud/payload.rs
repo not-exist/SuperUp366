@@ -5,6 +5,8 @@
 //!
 //! - one `<answer>` per question in `result.testInfo.answerdata`, carrying the
 //!   uploaded URL, the reported score and the question text;
+//! - `qstJson` keeps each question's own `question_type` (9/12/13), because the
+//!   recording branch serves spoken follow-read, Q&A and retelling alike;
 //! - one `<mark_data>` per question in `result.testInfo.markdatao`;
 //! - `qstJson` is a **flat array**: one `elementType = 1` row per question and
 //!   one `elementType = 2` row per sentence (`{questionId}-{n}`);
@@ -132,7 +134,7 @@ pub fn build_row(
 
         let attr = json!({
             "question_id": question_id,
-            "question_type": 9,
+            "question_type": question.question_type,
             "order": 1,
             "user_score": score,
             "user_answer": "",
@@ -270,6 +272,7 @@ mod tests {
             questions: vec![
                 PaperQuestion {
                     question_id: "Q1".to_owned(),
+                    question_type: 9,
                     number: 1,
                     score: 10.0,
                     duration: 82,
@@ -278,6 +281,7 @@ mod tests {
                 },
                 PaperQuestion {
                     question_id: "Q2".to_owned(),
+                    question_type: 9,
                     number: 2,
                     score: 10.0,
                     duration: 86,
@@ -351,6 +355,29 @@ mod tests {
     fn a_missing_recording_or_out_of_range_score_is_rejected() {
         assert!(build_row(&paper(), &context(), &recordings()[..1], &[8.0, 8.0], 1, 1,).is_err());
         assert!(build_row(&paper(), &context(), &recordings(), &[11.0, 8.0], 1, 1,).is_err());
+    }
+
+    #[test]
+    fn qst_json_keeps_the_question_own_recording_type() {
+        let mut typed = paper();
+        typed.questions[1].question_type = 13;
+        let row = build_row(
+            &typed,
+            &context(),
+            &recordings(),
+            &[8.0, 8.0],
+            1_793_714_405_924,
+            303,
+        )
+        .unwrap();
+
+        let rows = row["qstJson"].as_array().unwrap();
+        let parents: Vec<_> = rows
+            .iter()
+            .filter(|entry| entry["elementType"] == 1)
+            .map(|entry| entry["elementAttr"]["question_type"].clone())
+            .collect();
+        assert_eq!(parents, vec![json!(9), json!(13)]);
     }
 
     #[test]
