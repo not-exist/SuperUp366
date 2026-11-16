@@ -51,7 +51,7 @@ node frontend/node_modules/@tauri-apps/cli/tauri.js build --bundles deb,appimage
 
 ## CI
 
-`.github/workflows/` 下的四个文件：
+`.github/workflows/` 下的五个文件：
 
 | 文件 | 作用 |
 |---|---|
@@ -59,6 +59,7 @@ node frontend/node_modules/@tauri-apps/cli/tauri.js build --bundles deb,appimage
 | `package.yml` | 可复用：双平台编译并打包 nsis / deb+appimage，上传为 action 产物 |
 | `audit.yml` | 可复用 + 每周定时：cargo-deny（advisories/bans/sources/licenses）与 pnpm audit |
 | `release.yml` | `v*` tag：复用 package，创建 draft release |
+| `codeql.yml` | CodeQL advanced setup：rust / javascript-typescript / actions，push、PR 与每周定时上传 SARIF |
 
 - PR 也执行打包，产物挂在 run 的 Artifacts 区；所有检查都不需要 Secret。
 - 新增依赖后若 `cargo-deny` 报许可证，先确认许可证再改 `deny.toml` 的 allow 列表。

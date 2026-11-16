@@ -1,0 +1,7 @@
+name: SuperUp366 CodeQL configuration
+
+# The frontend job installs the pnpm workspace before analysis so imports
+# resolve; third-party code is not what we report on. `paths`/`paths-ignore`
+# only apply to the interpreted languages, which here is javascript-typescript.
+paths-ignore:
+  - 'frontend/node_modules/**'
