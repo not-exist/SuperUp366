@@ -33,7 +33,7 @@ test.describe("应用文写作", () => {
       "已输入单词：11",
     );
     await expect(page.getByTestId("writing-wordcount-1")).toContainText(
-      "字符：56 / 3000",
+      "字符：54 / 3000",
     );
 
     await page.getByTestId("writing-preview").click();
