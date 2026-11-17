@@ -38,6 +38,9 @@ pub struct AnswerDocumentView {
     pub questions: Vec<AnswerQuestionView>,
     /// Raw paper XML, rendered collapsed in the UI.
     pub paper_xml: String,
+    /// The paper is a pure applied-writing paper, so the writing page can
+    /// submit it even when the job title did not advertise the category.
+    pub applied_writing: bool,
 }
 
 /// The ids the answer endpoint needs for one job.
@@ -118,6 +121,9 @@ async fn find_job_ids(
 /// Build the view from the decoded endpoint payload.
 fn build_view(job_id: String, task_id: String, detail: &AnswerDetail) -> AnswerDocumentView {
     let paper_xml = detail.paper_data().unwrap_or_default();
+    let applied_writing = adapters::parse_applied_writing(paper_xml)
+        .map(|paper| paper.require_all_writing().is_ok())
+        .unwrap_or(false);
     AnswerDocumentView {
         job_id,
         task_id,
@@ -125,6 +131,7 @@ fn build_view(job_id: String, task_id: String, detail: &AnswerDetail) -> AnswerD
         score: detail.score(),
         questions: Vec::new(),
         paper_xml: paper_xml.to_owned(),
+        applied_writing,
     }
 }
 
@@ -152,6 +159,7 @@ mod tests {
         assert_ne!(view.task_id, view.job_id);
         assert_eq!(view.paper_xml, "<elements/>");
         assert_eq!(view.score, Some(30.0));
+        assert!(!view.applied_writing);
     }
 
     #[test]
@@ -161,5 +169,28 @@ mod tests {
         let view = build_view("JOB-2".to_owned(), "CONTENT-2".to_owned(), &detail);
         assert!(view.paper_xml.is_empty());
         assert_eq!(view.score, None);
+        assert!(!view.applied_writing);
+    }
+
+    #[test]
+    fn a_pure_writing_paper_is_flagged_for_the_answer_page() {
+        let detail: AnswerDetail = serde_json::from_value(serde_json::json!({
+            "paperInfo": { "paperData": "<elements><element id=\"Q1\" type=\"3\"><question_type>14</question_type><question_score>15</question_score></element></elements>" },
+            "userAnswer": {}
+        }))
+        .unwrap();
+        let view = build_view("JOB-3".to_owned(), "CONTENT-3".to_owned(), &detail);
+        assert!(view.applied_writing);
+    }
+
+    #[test]
+    fn a_mixed_paper_is_not_flagged_as_submittable_writing() {
+        let detail: AnswerDetail = serde_json::from_value(serde_json::json!({
+            "paperInfo": { "paperData": "<elements>                <element id=\"Q1\" type=\"3\"><question_type>4</question_type><question_score>10</question_score></element>                <element id=\"Q2\" type=\"3\"><question_type>14</question_type><question_score>15</question_score></element>            </elements>" },
+            "userAnswer": {}
+        }))
+        .unwrap();
+        let view = build_view("JOB-4".to_owned(), "CONTENT-4".to_owned(), &detail);
+        assert!(!view.applied_writing);
     }
 }

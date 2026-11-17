@@ -31,6 +31,7 @@ type KindFilter = "all" | JobKind | "read_aloud";
 const KIND_LABELS: Record<JobKind, string> = {
   ordinary: "普通作业",
   word_pk: "单词 PK",
+  applied_writing: "应用文",
   unknown: "类型未知",
 };
 
@@ -38,6 +39,7 @@ const READ_ALOUD_LABEL = "跟读作业";
 
 function kindLabel(job: JobRow): string | null {
   if (job.kind === "word_pk") return "单词 PK";
+  if (job.kind === "applied_writing") return "应用文线索";
   if (job.read_aloud) return "含朗读";
   return null;
 }
@@ -163,6 +165,7 @@ export function Jobs() {
             <option value="all">全部类型</option>
             <option value="ordinary">{KIND_LABELS.ordinary}</option>
             <option value="word_pk">{KIND_LABELS.word_pk}</option>
+            <option value="applied_writing">{KIND_LABELS.applied_writing}</option>
             <option value="read_aloud">{READ_ALOUD_LABEL}</option>
             <option value="unknown">{KIND_LABELS.unknown}</option>
           </select>

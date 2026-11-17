@@ -17,10 +17,10 @@
 //! The recording unit is the **question**, not the sentence: one mp3 per
 //! recording element, no matter how many sentences it contains.
 
-use percent_encoding::percent_decode_str;
-use quick_xml::events::{BytesStart, Event};
-use quick_xml::{Reader, XmlVersion};
+use quick_xml::events::Event;
+use quick_xml::Reader;
 
+use crate::adapters::paper::{local_name, parse_questions, plain_text, RawQuestion};
 use crate::error::{ProtocolError, Result};
 
 /// Question types the reader renders as recordings.
@@ -81,11 +81,11 @@ impl ReadAloudPaper {
 /// `path_prefix` comes from the same paper-detail payload and is only used to
 /// turn a reference audio path into an absolute URL.
 pub fn parse_paper(xml: &str, path_prefix: &str) -> Result<ReadAloudPaper> {
-    let parsed = questions_from_paper(xml);
+    let parsed = parse_questions(xml)?;
     let mut questions = Vec::new();
     let mut non_read_aloud = 0;
-    for partial in parsed {
-        let question = partial.into_question();
+    for raw in parsed {
+        let question = into_question(raw);
         // `<element type="0">` group captions (`<element_caption>`) carry no
         // `question_type`. They are layout nodes, not questions, and counting
         // them made every read-aloud paper with a section title look mixed.
@@ -136,125 +136,22 @@ fn recording_question_type(text: &str) -> Option<i64> {
     RECORDING_QUESTION_TYPES.contains(&value).then_some(value)
 }
 
-#[derive(Debug, Default)]
-struct PartialQuestion {
-    question_id: String,
-    question_type: String,
-    score: f64,
-    duration: u32,
-    attachment: String,
-    question_text: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Collecting {
-    Nothing,
-    Type,
-    Score,
-    Duration,
-    Attachment,
-    Text,
-}
-
-fn questions_from_paper(xml: &str) -> Vec<PartialQuestion> {
-    let mut questions = Vec::new();
-    if xml.trim().is_empty() {
-        return questions;
-    }
-
-    let mut reader = Reader::from_str(xml);
-    let mut current: Option<PartialQuestion> = None;
-    let mut depth = 0usize;
-    let mut collecting = Collecting::Nothing;
-    let mut buffer = String::new();
-
-    loop {
-        let event = match reader.read_event() {
-            Ok(Event::Eof) | Err(_) => break,
-            Ok(event) => event,
-        };
-        match event {
-            Event::Start(start) => {
-                if local_name(&start) == "element" {
-                    if current.is_none() {
-                        current = Some(PartialQuestion {
-                            question_id: attribute(&start, "id").unwrap_or_default(),
-                            ..Default::default()
-                        });
-                    }
-                    depth += 1;
-                    continue;
-                }
-                if current.is_none() {
-                    continue;
-                }
-                let next = match local_name(&start) {
-                    "question_type" => Collecting::Type,
-                    "question_score" => Collecting::Score,
-                    "duration" => Collecting::Duration,
-                    "attachment" => Collecting::Attachment,
-                    "question_text" => Collecting::Text,
-                    _ => Collecting::Nothing,
-                };
-                if next != Collecting::Nothing {
-                    collecting = next;
-                    buffer.clear();
-                }
-            }
-            Event::End(end) => {
-                if end.name().local_name().into_inner() == "element" {
-                    depth = depth.saturating_sub(1);
-                    if depth == 0 {
-                        if let Some(question) = current.take() {
-                            questions.push(question);
-                        }
-                        collecting = Collecting::Nothing;
-                    }
-                    continue;
-                }
-                if let Some(question) = current.as_mut() {
-                    match collecting {
-                        Collecting::Type => question.question_type = buffer.trim().to_owned(),
-                        Collecting::Score => {
-                            question.score = buffer.trim().parse().unwrap_or_default()
-                        }
-                        Collecting::Duration => {
-                            question.duration = buffer.trim().parse().unwrap_or_default()
-                        }
-                        Collecting::Attachment => {
-                            question.attachment = decode_attachment(buffer.trim())
-                        }
-                        Collecting::Text => question.question_text = buffer.clone(),
-                        Collecting::Nothing => {}
-                    }
-                }
-                collecting = Collecting::Nothing;
-            }
-            Event::Text(text) if collecting != Collecting::Nothing => buffer.push_str(&text),
-            Event::CData(text) if collecting != Collecting::Nothing => buffer.push_str(&text),
-            _ => {}
+/// Fold the shared scan into the read-aloud question shape.
+fn into_question(raw: RawQuestion) -> QuestionFields {
+    let mut sentences = sentences_from_attachment(&raw.attachment);
+    if sentences.is_empty() {
+        let text = plain_text(&raw.question_text);
+        if !text.is_empty() {
+            sentences.push(text);
         }
     }
-    questions
-}
-
-impl PartialQuestion {
-    fn into_question(self) -> QuestionFields {
-        let mut sentences = sentences_from_attachment(&self.attachment);
-        if sentences.is_empty() {
-            let text = plain_text(&self.question_text);
-            if !text.is_empty() {
-                sentences.push(text);
-            }
-        }
-        QuestionFields {
-            question_id: self.question_id,
-            question_type: self.question_type,
-            score: self.score,
-            duration: self.duration,
-            sentences,
-            audio_url: attribute_from_text(&self.question_text, "url"),
-        }
+    QuestionFields {
+        question_id: raw.question_id,
+        question_type: raw.question_type,
+        score: raw.score,
+        duration: raw.duration,
+        sentences,
+        audio_url: attribute_from_text(&raw.question_text, "url"),
     }
 }
 
@@ -321,14 +218,6 @@ fn sentences_from_attachment(xml: &str) -> Vec<String> {
     sentences
 }
 
-/// `<attachment>` is URL-encoded; `+` means a space, as in a query string.
-fn decode_attachment(encoded: &str) -> String {
-    let with_spaces = encoded.replace('+', " ");
-    percent_decode_str(&with_spaces)
-        .decode_utf8_lossy()
-        .into_owned()
-}
-
 fn absolute_url(prefix: &str, path: &str) -> Option<String> {
     if path.starts_with("http://") || path.starts_with("https://") {
         return Some(path.to_owned());
@@ -350,42 +239,6 @@ fn attribute_from_text(text: &str, name: &str) -> Option<String> {
     let rest = &text[start..];
     let end = rest.find('"')?;
     Some(rest[..end].to_owned())
-}
-
-fn local_name<'a>(start: &'a BytesStart<'_>) -> &'a str {
-    start.name().local_name().into_inner()
-}
-
-fn attribute(start: &BytesStart<'_>, name: &str) -> Option<String> {
-    start
-        .attributes()
-        .flatten()
-        .find(|attribute| attribute.key.local_name().into_inner() == name)
-        .and_then(|attribute| attribute.normalized_value(XmlVersion::Implicit1_0).ok())
-        .map(|value| value.into_owned())
-}
-
-fn plain_text(html: &str) -> String {
-    let mut text = String::with_capacity(html.len());
-    let mut in_tag = false;
-    for character in html.chars() {
-        match character {
-            '<' => in_tag = true,
-            '>' => {
-                in_tag = false;
-                text.push(' ');
-            }
-            _ if !in_tag => text.push(character),
-            _ => {}
-        }
-    }
-    let decoded = text
-        .replace("&nbsp;", " ")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&amp;", "&");
-    decoded.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]

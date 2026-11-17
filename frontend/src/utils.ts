@@ -31,6 +31,19 @@ export function percent(current: number, total: number): number {
   return Math.min(100, Math.max(0, Math.round((current / total) * 100)));
 }
 
+export function writingCharacterCount(text: string): number {
+  return text.replace(/\n+/g, "").length;
+}
+
+/** Count English words the way the writing editor does: punctuation splits. */
+export function countWords(text: string): number {
+  const cleaned = text.replace(/[\r\n\t,，;；!！.。?？:：'"“”‘’/\\()[\]{}<>_+=*\-%$¥@#&£€]/g, " ");
+  return cleaned
+    .trim()
+    .split(/\s+/)
+    .filter((word) => /[\w]/.test(word)).length;
+}
+
 export function initialOf(name: string): string {
   const trimmed = name.trim();
   return trimmed ? trimmed.slice(0, 1).toUpperCase() : "U";

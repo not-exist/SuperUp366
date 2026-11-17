@@ -3,6 +3,7 @@ import { AppShell } from "./components/AppShell";
 import { ErrorState } from "./components/ErrorState";
 import { useAccounts } from "./hooks/account";
 import { AnswerView } from "./pages/AnswerView";
+import { AppliedWriting } from "./pages/AppliedWriting";
 import { BookDetail } from "./pages/BookDetail";
 import { BookTask } from "./pages/BookTask";
 import { Books } from "./pages/Books";
@@ -46,6 +47,7 @@ export default function App() {
           <Route index element={<Navigate to="/jobs" replace />} />
           <Route path="jobs" element={<Jobs />} />
           <Route path="jobs/:jobId/answer" element={<AnswerView />} />
+          <Route path="jobs/:jobId/writing" element={<AppliedWriting />} />
           <Route path="jobs/:jobId/wordpk" element={<WordPk />} />
           <Route path="jobs/:jobId/readaloud" element={<ReadAloud />} />
           <Route path="books" element={<Books />} />

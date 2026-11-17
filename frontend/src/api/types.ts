@@ -4,7 +4,7 @@
 // `up366-*` crates, so a command can return a domain struct unchanged.
 // Every timestamp is an ISO-8601 string in UTC.
 
-export type JobKind = "ordinary" | "word_pk" | "unknown";
+export type JobKind = "ordinary" | "word_pk" | "applied_writing" | "unknown";
 
 /** Coarse status resolved by `up366_core::resolve_status`. */
 export type JobStatusKind =
@@ -171,6 +171,8 @@ export interface AnswerDocument {
   max_score: number;
   paper_xml: string;
   questions: AnswerQuestion[];
+  /** The paper is a pure applied-writing paper; the writing page can submit it. */
+  applied_writing: boolean;
 }
 
 /** One question type group from the error-notebook overview. */
@@ -323,6 +325,61 @@ export interface ReadAloudSubmit {
   message: string;
 }
 
+/** One writing question detected in an applied-writing paper. */
+export interface AppliedWritingQuestion {
+  question_id: string;
+  /** `<question_no>` as the paper spells it. */
+  number: string;
+  score: number;
+  /** Prompt text with its paragraphs preserved. */
+  prompt: string;
+  /** Suggested word count, when the paper declares one. */
+  word_num: number | null;
+  /** Reference duration in seconds. */
+  duration: number;
+}
+
+/** An applied-writing (应用文) task, confirmed from the paper detail. */
+export interface AppliedWritingTask {
+  job_id: string;
+  title: string;
+  submitted: boolean;
+  /** Expired jobs are not blocked here; the UI only warns. */
+  expired: boolean;
+  total_score: number;
+  questions: AppliedWritingQuestion[];
+}
+
+/** One essay supplied by the user. */
+export interface WritingAnswerInput {
+  question_id: string;
+  text: string;
+}
+
+export interface AppliedWritingPreviewAnswer {
+  question_id: string;
+  number: string;
+  text: string;
+}
+
+export interface AppliedWritingPreview {
+  job_id: string;
+  title: string;
+  total_score: number;
+  answers: AppliedWritingPreviewAnswer[];
+  /** The exact `answerData` XML a submission would carry. */
+  answer_data: string;
+  /** Single-use token for `applied_writing_submit`. */
+  confirm_token: string;
+}
+
+export interface AppliedWritingSubmit {
+  ok: boolean;
+  verified: boolean;
+  score: number | null;
+  message: string;
+}
+
 export interface Settings {
   /** Maximum number of parallel upstream requests. */
   concurrency: number;
@@ -441,6 +498,24 @@ export interface CommandMap {
       scores?: { question_id: string; score: number }[];
     };
     result: ReadAloudPreview;
+  };
+
+  applied_writing_get: {
+    args: { account_id: string; job_id: string };
+    result: AppliedWritingTask;
+  };
+  applied_writing_preview: {
+    args: {
+      account_id: string;
+      job_id: string;
+      answers: WritingAnswerInput[];
+      duration_sec: number;
+    };
+    result: AppliedWritingPreview;
+  };
+  applied_writing_submit: {
+    args: { confirm_token: string };
+    result: AppliedWritingSubmit;
   };
 
   correction_overview: {
