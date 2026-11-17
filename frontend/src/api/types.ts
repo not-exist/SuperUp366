@@ -4,7 +4,12 @@
 // `up366-*` crates, so a command can return a domain struct unchanged.
 // Every timestamp is an ISO-8601 string in UTC.
 
-export type JobKind = "ordinary" | "word_pk" | "applied_writing" | "unknown";
+export type JobKind =
+  | "ordinary"
+  | "word_pk"
+  | "applied_writing"
+  | "dictation"
+  | "unknown";
 
 /** Coarse status resolved by `up366_core::resolve_status`. */
 export type JobStatusKind =

@@ -6,6 +6,7 @@
 //! * [`JobKind::Ordinary`]       – a normal paper.
 //! * [`JobKind::WordPk`]        – a word-picking card created from the WordPkx app.
 //! * [`JobKind::AppliedWriting`] – an applied-writing (应用文) paper.
+//! * [`JobKind::Dictation`]     – a dictation / memorisation homework candidate.
 //!
 //! Applied writing is confirmed by the paper (`question_type = 14`), so the
 //! title hint only decides whether the UI offers the writing page; the paper
@@ -16,9 +17,10 @@
 //! only knowable after the paper detail (paper XML) is parsed, so it is
 //! modelled in [`crate::status`] / the sync layer, not here.
 //!
-//! Classification from the job-list name is a *hint only*. Anything that is
-//! not confidently a word-picking card stays [`JobKind::Ordinary`]; the
-//! authoritative kind is later reconciled against the paper detail.
+//! Classification from the job-list name is a *hint only*. A dictation hint
+//! does not establish the paper format or authorize submission; any
+//! kind-specific write behaviour must be confirmed against the paper and its
+//! protocol first.
 
 use serde::{Deserialize, Serialize};
 
@@ -32,6 +34,8 @@ pub enum JobKind {
     WordPk,
     /// An applied-writing (应用文) paper, confirmed from the paper detail.
     AppliedWriting,
+    /// A title or job-parameter hint for dictation homework; not submission authorization.
+    Dictation,
     /// Not yet classified (no reliable signal).
     Unknown,
 }
@@ -39,15 +43,17 @@ pub enum JobKind {
 impl JobKind {
     /// Conservative classification from a job title.
     ///
-    /// The upstream word-picking tasks are titled with a fixed prefix. We only
-    /// commit to [`JobKind::WordPk`] when that prefix is present. Applied
-    /// writing uses the course's own title convention (应用文/应用写作).
-    /// Everything else is [`JobKind::Unknown`] and must be confirmed against
-    /// the paper detail before any kind-specific behaviour runs.
+    /// 默写/听写/拼写 only marks a candidate: its paper and submission protocol
+    /// are not established by the title. Everything else is [`JobKind::Unknown`].
     pub fn hint_from_title(title: &str) -> Self {
         let t = title.trim_start();
         // Upstream WordPkx cards are titled like "单词...", "选词...".
-        if t.starts_with("单词") || t.contains("单词卡") {
+        if ["默写", "听写", "拼写"]
+            .iter()
+            .any(|needle| t.contains(needle))
+        {
+            JobKind::Dictation
+        } else if t.starts_with("单词") || t.contains("单词卡") {
             JobKind::WordPk
         } else if t.contains("应用文") || t.contains("应用写作") {
             JobKind::AppliedWriting
@@ -85,5 +91,17 @@ mod tests {
             JobKind::hint_from_title("写作训练：My Weekend"),
             JobKind::Unknown
         );
+    }
+
+    #[test]
+    fn dictation_titles_are_candidates_only() {
+        for title in ["课文默写练习", "周三听写", "单词拼写训练"] {
+            assert_eq!(JobKind::hint_from_title(title), JobKind::Dictation);
+        }
+        assert_eq!(
+            JobKind::hint_from_title("应用文范文默写"),
+            JobKind::Dictation
+        );
+        assert_eq!(JobKind::hint_from_title("英语作业"), JobKind::Unknown);
     }
 }

@@ -102,3 +102,44 @@ Resolve with one 新概念英语1 page chosen by the account owner: after the PO
 and the book detail progress must move. If the server rejects the empty
 `studyTaskId`, the failure code is the deciding evidence — do not retry with a
 self-made id, which writes a score row nothing associates with the page.
+
+## 13. Dictation / memorisation homework
+
+Candidate metadata observed in cached jobs includes `xotParam.wordDictationType
+= 0` (including `paperType = 2` examples) and `paperType = 5` examples without
+that flag. These are discovery hints only; neither field is established as an
+authoritative type or as a submission-mode selector. One sampled title-matched
+paper is documented in `confirmed.md` as `question_type = 19` (篇章默写), but
+that observation does not define all 默写 / 听写 / 单词拼写 tasks.
+
+Additional read-only evidence gathered 2026-11-17:
+
+- A live type-19 paper was retrieved through `paper/detail`; its paper XML
+  contains one `<element type="3">` with `<question_type>19</question_type>`.
+  `answer/detail/v2` for that same content ID returned `paperInfo.paperData`,
+  `paperInfo.answerData`, `userAnswer.answerData`, and `userAnswer.markData`.
+  The stored student answer is normalized XML containing an `<answers>` node
+  and `<pictures>` node; `markData` is a separate document. These are response
+  shapes, not proof of the original submit request shape.
+- `job/info` for that task reports `taskStatus=1`, `stuStatus=2`, and a
+  `submitTime`; the stale local job cache had reported `taskStatus=0`. This
+  confirms status can lag in cache, not that `reTest=1` permits another write.
+- `POST /client/onlinetesting/alldata` with the task `contentId` and uid returns
+  `code=1` / `测验不存在!`. This ID is not accepted as that endpoint's `testId`;
+  the result does not establish whether `/client/onlinetesting/submit` accepts
+  the same job, nor does it identify an alternative submit endpoint.
+- The official-client recon describes `/client/onlinetesting/submit` as the
+  whole-document homework route and `/client/task/score/submit/v2` as the
+  per-question textbook route. Its recorded `getPaperXML` implementation is
+  for applied-writing type 14 only. The saved real-submit fixtures cover type 4
+  on the gzip task-score route; none contain type 19.
+
+Still unverified: which of those write routes the type-19 homework uses,
+submittable ID mapping, exact type-19 input-to-answer XML (including whether
+`<pictures>` and `markData` are sent), request fields, and duplicate/returned/
+retest behavior. No dedicated resubmit API is evidenced. `reTest`, `taskStatus`,
+`submitTime`, and `disabledOnline` must not be treated as permission to submit
+or resubmit. Keep the feature read-only until the type-19 serializer and write
+call site are evidenced in official client material; do not try candidate write
+routes against a real account. A session rejected with `-21/-22/-23` must be
+reported, with no second login in the same task.

@@ -49,6 +49,23 @@ test.describe("作业列表", () => {
     await expect(page.getByTestId("job-row-job-1-9")).toContainText("含朗读");
   });
 
+  test("默写标题只作为候选线索筛选", async ({ page }) => {
+    await openJobs(page);
+
+    await page.locator("#job-kind").selectOption("dictation");
+    await expect(page.getByTestId("jobs-summary")).toContainText(
+      "筛选后 3 项",
+    );
+    await expect(page.getByTestId("job-row-job-1-2")).toContainText(
+      "默写线索 · 协议待确认",
+    );
+
+    await page.getByTestId("job-row-job-1-2").click();
+    await expect(page.getByTestId("answer-page")).toBeVisible();
+    await expect(page.getByTestId("answer-writing-link")).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "去提交默写" })).toHaveCount(0);
+  });
+
   test("组合筛选与清除筛选", async ({ page }) => {
     await openJobs(page);
     await page.locator("#job-search").fill("单词卡");

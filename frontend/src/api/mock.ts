@@ -135,7 +135,7 @@ const courseSeeds: Course[] = [
 
 const jobTitles = [
   "Unit 1 词汇巩固",
-  "Unit 2 阅读理解",
+  "Unit 2 课文默写练习",
   "听力专项训练",
   "语法填空练习",
   "单元综合测试",
@@ -189,9 +189,11 @@ function buildJobs(): JobRow[] {
             : iso(1 + (seed % 9));
       const kind = name.includes("单词卡")
         ? "word_pk"
-        : name.includes("应用文")
-          ? "applied_writing"
-          : "ordinary";
+        : ["默写", "听写", "拼写"].some((hint) => name.includes(hint))
+          ? "dictation"
+          : name.includes("应用文")
+            ? "applied_writing"
+            : "ordinary";
       const status = makeStatus(statusKind, seed);
       return {
         job_id: `job-${courseIndex + 1}-${jobIndex + 1}`,

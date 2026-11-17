@@ -47,7 +47,7 @@ type JobRow = {
   course_name: string;
   class_name: string;              // label on the row, never a grouping key
   name: string;
-  kind: "ordinary" | "word_pk" | "applied_writing" | "unknown";
+  kind: "ordinary" | "word_pk" | "applied_writing" | "dictation" | "unknown";
   status: { kind: "finished" | "returned" | "expired" | "pending" | "unknown";
             score?: number | null };
   score: number | null;
@@ -59,6 +59,11 @@ type JobRow = {
 Rows are produced by `up366_sync::merge_jobs`: courses in upstream order, then
 the upstream array order inside each course. The same job under two classes
 yields two rows.
+
+`kind = dictation` is only a candidate hint from a 默写/听写/拼写 title or
+`xotParam.wordDictationType = 0`. It is not paper validation or authorization
+to submit; the job still opens the ordinary read-only answer view while the
+dictation answer and write protocol remain unconfirmed.
 
 ## Books
 
