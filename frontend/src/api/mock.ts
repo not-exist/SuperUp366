@@ -551,7 +551,6 @@ function mockPreview(
 const submittedWritingJobs = new Set<string>();
 const pendingWritingJobs = new Map<string, string>();
 let writingPreviewCount = 0;
-let writingPreviewCount = 0;
 
 function appliedWritingTask(jobId: string): AppliedWritingTask {
   const job = jobs.find((row) => row.job_id === jobId);
