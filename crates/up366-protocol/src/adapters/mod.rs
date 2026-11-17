@@ -9,10 +9,12 @@ pub mod answers;
 pub mod books;
 pub mod catalog;
 pub mod correction;
+mod paper;
 pub mod profile;
 pub mod readaloud;
 pub mod wordpk;
 pub mod words;
+pub mod writing;
 
 pub use answers::{
     answer_detail, answer_detail_v1, answer_detail_v2, paper_detail, textbook_paperinfo,
@@ -34,6 +36,11 @@ pub use readaloud::{
 };
 pub use wordpk::{submit_word_pk, WordPkSubmission};
 pub use words::bucket_words;
+pub use writing::{
+    build_answer_data, parse_applied_writing, submit_applied_writing, AppliedWritingPaper,
+    AppliedWritingSubmission, WritingAnswer, WritingQuestion, APPLIED_WRITING_QUESTION_TYPE,
+    MAX_WRITING_CHARS,
+};
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;

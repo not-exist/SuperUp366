@@ -47,7 +47,7 @@ type JobRow = {
   course_name: string;
   class_name: string;              // label on the row, never a grouping key
   name: string;
-  kind: "ordinary" | "word_pk" | "unknown";
+  kind: "ordinary" | "word_pk" | "applied_writing" | "unknown";
   status: { kind: "finished" | "returned" | "expired" | "pending" | "unknown";
             score?: number | null };
   score: number | null;
@@ -116,7 +116,40 @@ shows words with their mastery, or question rows; read-aloud questions
 
 `AnswerDocument.task_id` is the job's `contentId` — that is what the upstream
 endpoint requires, not the job id. `paper_xml` is kept verbatim for the
-collapsed raw view.
+collapsed raw view. `applied_writing` is true when the paper is a pure
+`question_type = 14` paper; the answer page then links to the writing submit
+route. A mixed paper is false, because the writing page refuses to submit the
+non-writing part empty.
+
+## Applied writing (应用文)
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `applied_writing_get` | `account_id, job_id` | `AppliedWritingTask` (detected writing questions) |
+| `applied_writing_preview` | `account_id, job_id, answers[{question_id, text}], duration_sec` | `AppliedWritingPreview` (answer XML + `confirm_token`) |
+| `applied_writing_submit` | `confirm_token` | `AppliedWritingSubmit` |
+
+`applied_writing_get` reads the job's paper and keeps only `question_type = 14`
+(`应用文写作`) questions. A paper that mixes writing with other question types is
+refused with `unsupported`: this client can only answer the writing part, and
+submitting the rest empty would silently burn the task. The job list's
+`kind = applied_writing` is a title hint (应用文 / 应用写作); the paper check is
+authoritative. The job list routes to the ordinary answer page first; that page
+offers a submit link only after the paper has been confirmed as pure writing.
+
+`applied_writing_preview` requires one non-empty essay per detected question
+(3000 characters excluding line breaks, the official editor's limit), builds
+the H5 player's `answerData` document
+
+```xml
+<elements><element id="…"><answers><![CDATA[essay text]]></answers></element></elements>
+```
+
+and stores it in a single-use token together with the job's `contentId`,
+`paperId`, uid and study seconds. `applied_writing_submit` posts the document to
+`xot-api /client/onlinetesting/submit` with `testId` and `taskId` set to
+`contentId`, then reads the account-wide finished list back. No score is sent:
+the server grades the essay. Expired jobs are warned about, not blocked.
 
 ## Word PK
 

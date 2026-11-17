@@ -205,6 +205,16 @@ pub const ENDPOINTS: &[Endpoint] = &[
         BodyKind::Form,
     ),
     // --- answers / papers --------------------------------------------
+    // The H5 homework player submits the whole answer document here (no
+    // `tasksJson`, no `ut`); the Electron client queues the same row and
+    // replays it to this endpoint.
+    ep(
+        "onlinetesting_submit",
+        XOT_API,
+        "/client/onlinetesting/submit",
+        true,
+        BodyKind::Form,
+    ),
     ep(
         "answer_detail_v2",
         DSB_API,
@@ -367,6 +377,7 @@ mod tests {
             writes,
             vec![
                 "login",
+                "onlinetesting_submit",
                 "word_pk_submit",
                 "task_score_submit",
                 "task_score_gzip_submit",

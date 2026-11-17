@@ -40,10 +40,13 @@ by branch A. The confirmed facts now live in `confirmed.md` § "Read-aloud".
 Whether `allTaskList` array order equals the official UI order. If not, identify
 the real sort key (`beginTime` / `endTime` / `displayOrder` / `taskNo`).
 
-## 6. Essay detection
+## 6. Composition detection
 
-How to reliably identify composition (作文) jobs so they are excluded from the
-answer view. Current code leaves them `JobKind::Unknown` until confirmed.
+Applied writing (应用文) is resolved: the paper marks it with
+`question_type = 14`, and `JobKind::AppliedWriting` is a title hint
+(应用文 / 应用写作) reconciled against the paper. Mixed papers and 读后续写
+(`question_type = 18`) remain out of scope for the writing page. Detection of
+general 作文/续写 jobs is still unresolved.
 
 ## 7. Multi-account
 

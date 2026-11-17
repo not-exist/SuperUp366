@@ -44,6 +44,7 @@ URL once with `?ticket=<st>` (or `&ticket=` when a query already exists).
 | Jobs | `studytask-api /client/student/course/job` (`data.allTaskList`) |
 | Job history | `studytask-api /client/student/all/course/range/job` (`data[]`) |
 | Job detail | `studytask-api /client/student/job/info` (`studyTaskId = jobId`) |
+| Homework submit | `xot-api /client/onlinetesting/submit` (whole answer document) |
 | Finished/returned | `studytask-api /client/student/all/course/finish/job/v2` |
 | Finished scores | `dsb-api /client/book/finished-task/list` |
 | Books (purchased) | `book-api /client/books/buy-book` |
@@ -243,6 +244,32 @@ job-id join can never resolve. The official reader still submits them through
 The row above is read from the official reader bundle and the read-only probes
 are live; a live submission from this client has not been recorded yet (see
 `to-probe.md` §12).
+
+## Applied writing (应用文)
+
+- Question marker: `question_type = 14` (`qlib_qst_type_name = 应用文写作`).
+  `question_type = 18` is 读后续写, a different and unsupported branch.
+  **[S]** read-only on the reference account, 2026-11-16.
+- The H5 homework player reads the paper through
+  `/client/onlinetesting/alldata` and serialises each writing answer with the
+  xot engine's `getPaperXML`: `<element id="…"><answers><![CDATA[text]]></answers></element>`
+  and no `markData`. **[R]** `homework.<hash>.js` `paperSubmit`,
+  `common-xot-test.<hash>.js` `getPaperXML` case 14.
+- Submit: form POST `xot-api /client/onlinetesting/submit` with
+  `testId` = the job's `contentId`, `paperId`, `uid`, `answerData` and
+  `duration`. The H5 adds `headers[clientId]`; the Electron client queues the
+  same row as `TestStuded`, where `taskId` is copied into `testId` on send.
+  **[R]** `api.md` §1.14, `homework.<hash>.js`, engine `onlinetestingSubmit`.
+- Of 12 sampled jobs whose title contains 应用文, 10 answered with a single
+  type-14 question. One 月考 paper mixed 20 fill-in questions with one writing
+  question; one 应用文范文默写 paper was type 19 (篇章默写). This client refuses
+  both, because it cannot answer the non-writing part. **[S]**
+- Stored answers (`answer_detail.userAnswer.answerData`) show the
+  server-normalised shape
+  `<answers>'<![CDATA[text]]>'</answers><pictures></pictures>`; the client sends
+  the engine shape above. **[S]** read-only, 2026-11-16.
+- Completion: the job appears in `/client/student/all/course/finish/job/v2`
+  with its score after the server grades the essay.
 
 ## Error-notebook: correction
 

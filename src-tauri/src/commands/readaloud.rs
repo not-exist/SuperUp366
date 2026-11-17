@@ -27,10 +27,9 @@ use std::collections::HashMap;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use up366_core::{AccountId, JobId};
+use up366_core::AccountId;
 use up366_protocol::adapters::{self, ReadAloudContext, ReadAloudPaper, ReadAloudRecording};
 use up366_protocol::dto::Job;
-use up366_store::JobRecord;
 
 use crate::error::{AppError, CommandResult};
 use crate::session::AppState;
@@ -335,7 +334,7 @@ async fn verify_finished(
 ) -> CommandResult<(bool, Option<f64>, Option<String>)> {
     match &pending.target {
         PendingTarget::Job { job_id, course_id } => {
-            verify_finished_job(
+            crate::commands::verify_finished_job(
                 state,
                 account_id,
                 client,
@@ -349,56 +348,6 @@ async fn verify_finished(
             verify_finished_book(state, account_id, client, book_id, task_id).await
         }
     }
-}
-
-async fn verify_finished_job(
-    state: &AppState,
-    account_id: &AccountId,
-    client: &up366_protocol::Client,
-    job_id: &str,
-    course_id: &str,
-    total_score: f64,
-) -> CommandResult<(bool, Option<f64>, Option<String>)> {
-    for attempt in 0..4 {
-        if attempt > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-        }
-        let rows = match adapters::course_finished_jobs(client, course_id).await {
-            Ok(rows) => rows,
-            Err(error) if client.is_expired() => {
-                return Err(state.session_error(account_id, client, error))
-            }
-            Err(_) => continue,
-        };
-        let Some(row) = rows.finished.iter().find(|row| row.id() == Some(job_id)) else {
-            continue;
-        };
-        let score = row.score;
-        let batch_id = row
-            .raw
-            .get("batchId")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        state
-            .db
-            .cache()
-            .upsert_job_status(
-                account_id,
-                &up366_store::JobStatusRecord {
-                    job_id: JobId::from(job_id),
-                    task_status: Some(1),
-                    stu_status: Some(2),
-                    submit_time: Some(up366_store::now_millis()),
-                    score,
-                    max_score: Some(total_score),
-                    fetched_at: up366_store::now_millis(),
-                },
-            )
-            .await
-            .map_err(storage_error)?;
-        return Ok((true, score, batch_id));
-    }
-    Ok((false, None, None))
 }
 
 async fn verify_finished_book(
@@ -690,7 +639,7 @@ async fn load_job_task(
     client: &up366_protocol::Client,
     job_id: &str,
 ) -> CommandResult<LoadedTask> {
-    let record = find_job(state, account_id, client, job_id).await?;
+    let record = crate::commands::find_job(state, account_id, client, job_id).await?;
     let data: Value = serde_json::from_str(&record.raw_json)
         .map_err(|error| AppError::new("storage_error", error.to_string()))?;
     let job = Job::from_value(data).map_err(AppError::from)?;
@@ -739,7 +688,9 @@ async fn load_job_task(
         .as_deref()
         .and_then(up366_core::parse_deadline)
         .is_some_and(|deadline| deadline < Utc::now());
-    let submitted = is_submitted(state, account_id, client, job_id, &course_id, &job).await?;
+    let submitted =
+        crate::commands::is_job_submitted(state, account_id, client, job_id, &course_id, &job)
+            .await?;
 
     Ok(LoadedTask {
         source: TaskSource::Job {
@@ -854,65 +805,6 @@ async fn load_assets(
 /// The storage key for a course-book page's recordings.
 fn book_assets_key(book_id: &str, task_id: &str) -> String {
     format!("book:{book_id}:{task_id}")
-}
-
-/// Find a cached job, refreshing the catalog once when a direct link missed.
-async fn find_job(
-    state: &AppState,
-    account_id: &AccountId,
-    client: &up366_protocol::Client,
-    job_id: &str,
-) -> CommandResult<JobRecord> {
-    let find = |rows: Vec<JobRecord>| rows.into_iter().find(|row| row.job_id.as_str() == job_id);
-    if let Some(row) = find(
-        state
-            .db
-            .cache()
-            .jobs(account_id, None)
-            .await
-            .map_err(storage_error)?,
-    ) {
-        return Ok(row);
-    }
-    crate::commands::catalog::refresh_catalog(state, account_id, client).await?;
-    find(
-        state
-            .db
-            .cache()
-            .jobs(account_id, None)
-            .await
-            .map_err(storage_error)?,
-    )
-    .ok_or_else(|| AppError::new("not_found", "作业不在缓存中，请先刷新作业列表"))
-}
-
-async fn is_submitted(
-    state: &AppState,
-    account_id: &AccountId,
-    client: &up366_protocol::Client,
-    job_id: &str,
-    course_id: &str,
-    job: &Job,
-) -> CommandResult<bool> {
-    if job.finished() {
-        return Ok(true);
-    }
-    let status = state
-        .db
-        .cache()
-        .job_status(account_id, &JobId::from(job_id))
-        .await
-        .map_err(storage_error)?;
-    if status.is_some_and(|status| {
-        status.task_status == Some(1) || status.stu_status.is_some_and(|value| value > 1)
-    }) {
-        return Ok(true);
-    }
-    match adapters::course_finished_jobs(client, course_id).await {
-        Ok(rows) => Ok(rows.finished.iter().any(|row| row.id() == Some(job_id))),
-        Err(error) if client.is_expired() => Err(state.session_error(account_id, client, error)),
-        Err(_) => Ok(false),
-    }
 }
 
 fn storage_error(error: up366_store::StoreError) -> AppError {

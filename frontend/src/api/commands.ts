@@ -54,6 +54,26 @@ export const api = {
   getAnswer: (accountId: string, jobId: string) =>
     invokeCommand("answer_get", { account_id: accountId, job_id: jobId }),
 
+  getAppliedWriting: (accountId: string, jobId: string) =>
+    invokeCommand("applied_writing_get", {
+      account_id: accountId,
+      job_id: jobId,
+    }),
+  previewAppliedWriting: (
+    accountId: string,
+    jobId: string,
+    answers: { question_id: string; text: string }[],
+    durationSec: number,
+  ) =>
+    invokeCommand("applied_writing_preview", {
+      account_id: accountId,
+      job_id: jobId,
+      answers,
+      duration_sec: durationSec,
+    }),
+  submitAppliedWriting: (confirmToken: string) =>
+    invokeCommand("applied_writing_submit", { confirm_token: confirmToken }),
+
   previewWordPk: (accountId: string, jobId: string, score: number, total: number) =>
     invokeCommand("wordpk_preview", {
       account_id: accountId,

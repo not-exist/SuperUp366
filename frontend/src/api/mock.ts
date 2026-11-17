@@ -9,6 +9,9 @@ import type {
   Account,
   AnswerDocument,
   AnswerQuestion,
+  AppliedWritingPreview,
+  AppliedWritingSubmit,
+  AppliedWritingTask,
   Book,
   BookDetail,
   BookJob,
@@ -138,7 +141,7 @@ const jobTitles = [
   "单元综合测试",
   "完形填空强化",
   "单词卡 · Unit 3",
-  "写作训练：My Weekend",
+  "应用文写作：My Weekend",
   "课文跟读 Unit 4",
   "期末模拟卷",
   "短语搭配练习",
@@ -184,7 +187,11 @@ function buildJobs(): JobRow[] {
           : statusKind === "finished"
             ? iso(-(1 + (seed % 4)))
             : iso(1 + (seed % 9));
-      const kind = name.includes("单词卡") ? "word_pk" : "ordinary";
+      const kind = name.includes("单词卡")
+        ? "word_pk"
+        : name.includes("应用文")
+          ? "applied_writing"
+          : "ordinary";
       const status = makeStatus(statusKind, seed);
       return {
         job_id: `job-${courseIndex + 1}-${jobIndex + 1}`,
@@ -350,6 +357,7 @@ function buildAnswer(jobId: string, title: string): AnswerDocument {
     max_score: questions.reduce((sum, question) => sum + question.max_score, 0),
     paper_xml: `<paper id="${jobId}"><section type="reading"><question number="1" type="1"/></section></paper>`,
     questions,
+    applied_writing: false,
   };
 }
 
@@ -538,6 +546,69 @@ function mockPreview(
   } satisfies ReadAloudPreview;
 }
 
+// --- applied writing --------------------------------------------------
+
+const submittedWritingJobs = new Set<string>();
+const pendingWritingJobs = new Map<string, string>();
+let writingPreviewCount = 0;
+let writingPreviewCount = 0;
+
+function appliedWritingTask(jobId: string): AppliedWritingTask {
+  const job = jobs.find((row) => row.job_id === jobId);
+  return {
+    job_id: jobId,
+    title: job?.name ?? "应用文写作",
+    submitted: submittedWritingJobs.has(jobId),
+    expired: false,
+    total_score: 15,
+    questions: [
+      {
+        question_id: `${jobId}-w1`,
+        number: "1",
+        score: 15,
+        prompt:
+          "假定你是李华，你的英国朋友 Chris 想了解你校的体育活动。\n请你写一封邮件，内容包括：\n1. 你参加的体育活动；\n2. 你的感受。\n注意：词数 80 左右。",
+        word_num: 80,
+        duration: 1200,
+      },
+    ],
+  };
+}
+
+function mockWritingPreview(
+  jobId: string,
+  answers: { question_id: string; text: string }[],
+): AppliedWritingPreview {
+  const task = appliedWritingTask(jobId);
+  const token = `mock-writing-token-${++writingPreviewCount}`;
+  pendingWritingJobs.set(token, jobId);
+  if (answers.length !== task.questions.length) {
+    throw { code: "invalid_input", message: "请先填写全部作文", retryable: false };
+  }
+  const elements = task.questions.map((question) => {
+    const answer = answers.find((entry) => entry.question_id === question.question_id);
+    if (!answer || !answer.text.trim()) {
+      throw { code: "invalid_input", message: "作文不能为空", retryable: false };
+    }
+    return `<element id="${question.question_id}"><answers><![CDATA[${answer.text.trim()}]]></answers></element>`;
+  });
+  return {
+    job_id: jobId,
+    title: task.title,
+    total_score: task.total_score,
+    answers: task.questions.map((question) => {
+      const answer = answers.find((entry) => entry.question_id === question.question_id);
+      return {
+        question_id: question.question_id,
+        number: question.number,
+        text: answer?.text.trim() ?? "",
+      };
+    }),
+    answer_data: `<elements>${elements.join("")}</elements>`,
+    confirm_token: token,
+  };
+}
+
 // --- dispatcher -------------------------------------------------------
 
 export async function handleMock(
@@ -694,7 +765,9 @@ export async function handleMock(
       const { job_id } = args as CommandMap["answer_get"]["args"];
       await latency();
       const job = jobs.find((row) => row.job_id === job_id);
-      return buildAnswer(job_id, job?.name ?? "作业答案");
+      const answer = buildAnswer(job_id, job?.name ?? "作业答案");
+      answer.applied_writing = job?.kind === "applied_writing";
+      return answer;
     }
 
     case "wordpk_preview": {
@@ -772,6 +845,45 @@ export async function handleMock(
         batch_id: "mock-batch",
         message: "提交成功（预览环境，未发送到服务器）。",
       } satisfies ReadAloudSubmit;
+    }
+
+    case "applied_writing_get": {
+      const { job_id } = args as CommandMap["applied_writing_get"]["args"];
+      await latency();
+      return appliedWritingTask(job_id);
+    }
+
+    case "applied_writing_preview": {
+      const { job_id, answers } =
+        args as CommandMap["applied_writing_preview"]["args"];
+      await delay(420);
+      return mockWritingPreview(job_id, answers);
+    }
+
+    case "applied_writing_submit": {
+      const { confirm_token } = args as CommandMap["applied_writing_submit"]["args"];
+      await delay(700);
+      const jobId = pendingWritingJobs.get(confirm_token);
+      if (jobId === undefined) {
+        throw {
+          code: "confirmation_expired",
+          message: "确认已过期或已使用，请重新预览",
+          retryable: false,
+        };
+      }
+      pendingWritingJobs.delete(confirm_token);
+      const submitted = jobs.find((row) => row.job_id === jobId);
+      if (submitted) {
+        submittedWritingJobs.add(submitted.job_id);
+        submitted.status = { kind: "finished", score: 12 };
+        submitted.score = 12;
+      }
+      return {
+        ok: true,
+        verified: true,
+        score: 12,
+        message: "提交成功（预览环境，未发送到服务器）。",
+      } satisfies AppliedWritingSubmit;
     }
 
     case "correction_overview": {
@@ -951,6 +1063,9 @@ export function resetMock(options?: MockBootstrap): void {
   correctionRemaining = 12;
   correctionDraws = 0;
   drawnQuestions = [];
+  submittedWritingJobs.clear();
+  pendingWritingJobs.clear();
+  writingPreviewCount = 0;
   clearFailures();
   applyBootstrap(options);
 }

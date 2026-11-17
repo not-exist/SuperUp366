@@ -79,6 +79,26 @@ export function AnswerView() {
         <ErrorState error={answer.error} onRetry={() => answer.refetch()} />
       )}
 
+      {answer.isSuccess && answer.data.applied_writing && jobId && (
+        <div
+          className="banner banner--info"
+          role="note"
+          data-testid="answer-writing-link"
+        >
+          <div>
+            <strong>应用文写作</strong>
+            <span>试卷已确认为纯应用文写作，可填写后提交。</span>
+          </div>
+          <Link
+            className="button button--primary"
+            to={`/jobs/${jobId}/writing`}
+            style={{ marginLeft: "auto" }}
+          >
+            去提交应用文
+          </Link>
+        </div>
+      )}
+
       {answer.isSuccess &&
         questions.length === 0 &&
         !answer.data.paper_xml && (
