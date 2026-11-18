@@ -7,6 +7,7 @@
 //! A command never builds an upstream request by hand and never claims a
 //! success the server did not confirm.
 
+use chrono::Utc;
 use serde_json::Value;
 use up366_core::{AccountId, JobId};
 use up366_protocol::dto::Job;
@@ -20,6 +21,7 @@ pub mod accounts;
 pub mod books;
 pub mod catalog;
 pub mod correction;
+pub mod dictation;
 pub mod homework;
 pub mod readaloud;
 pub mod system;
@@ -116,6 +118,108 @@ pub(crate) async fn is_job_submitted(
         Ok(rows) => Ok(rows.finished.iter().any(|row| row.id() == Some(job_id))),
         Err(error) if client.is_expired() => Err(state.session_error(account_id, client, error)),
         Err(_) => Ok(false),
+    }
+}
+
+/// The ids and paper XML one job's answer page needs.
+///
+/// Every page that renders a paper (applied writing, dictation) resolves the
+/// same way: the job row may lack `contentId`/`paperId`, and `job/info` is the
+/// fallback. Keeping it here stops the two loaders from drifting apart.
+pub(crate) struct JobPaperContext {
+    pub job_id: String,
+    pub course_id: String,
+    pub title: String,
+    pub paper_id: String,
+    pub content_id: String,
+    pub paper_xml: String,
+    pub submitted: bool,
+    pub expired: bool,
+}
+
+pub(crate) async fn load_paper_context(
+    state: &AppState,
+    account_id: &AccountId,
+    client: &Client,
+    job_id: &str,
+) -> CommandResult<JobPaperContext> {
+    let record = find_job(state, account_id, client, job_id).await?;
+    let data: Value = serde_json::from_str(&record.raw_json)
+        .map_err(|error| AppError::new("storage_error", error.to_string()))?;
+    let job = Job::from_value(data).map_err(AppError::from)?;
+
+    let content_id = record
+        .content_id
+        .clone()
+        .or_else(|| job.content().map(str::to_owned))
+        .ok_or_else(|| AppError::new("protocol_drift", "作业缺少 contentId"))?;
+    let book_id = record
+        .book_id
+        .clone()
+        .or_else(|| job.book().map(str::to_owned))
+        .unwrap_or_default();
+    let course_id = record.course_id.as_str().to_owned();
+    let paper_id = match record
+        .paper_id
+        .clone()
+        .or_else(|| job.paper().map(str::to_owned))
+    {
+        Some(paper_id) if !paper_id.is_empty() => paper_id,
+        _ => {
+            let info = adapters::job_info(client, &course_id, job_id, &content_id, &book_id)
+                .await
+                .map_err(|error| state.session_error(account_id, client, error))?;
+            info.paper_id
+                .filter(|paper_id| !paper_id.is_empty())
+                .ok_or_else(|| AppError::new("protocol_drift", "作业缺少 paperId"))?
+        }
+    };
+
+    let detail = adapters::paper_detail(client, &paper_id)
+        .await
+        .map_err(|error| state.session_error(account_id, client, error))?;
+    let submitted = is_job_submitted(state, account_id, client, job_id, &course_id, &job).await?;
+    let expired = job
+        .end_time
+        .as_deref()
+        .and_then(up366_core::parse_deadline)
+        .is_some_and(|deadline| deadline < Utc::now());
+
+    Ok(JobPaperContext {
+        job_id: job_id.to_owned(),
+        course_id,
+        title: job.title().to_owned(),
+        paper_id,
+        content_id,
+        paper_xml: detail.paper_data,
+        submitted,
+        expired,
+    })
+}
+
+/// Whether a submitted job may be redone, and why not when it may not.
+///
+/// A probe failure that is not a session failure is reported as "not
+/// supported" with a reason: the page must stay read-only when the answer is
+/// unknown.
+pub(crate) async fn retest_state(
+    state: &AppState,
+    account_id: &AccountId,
+    client: &Client,
+    content_id: &str,
+    submitted: bool,
+) -> CommandResult<(bool, String)> {
+    if !submitted {
+        return Ok((false, String::new()));
+    }
+    let uid: i64 = uid_for(state, account_id, client)
+        .await?
+        .parse()
+        .map_err(|_| AppError::new("protocol_drift", "uid 不是数字"))?;
+    match adapters::probe_retest(client, content_id, uid).await {
+        Ok(support) => Ok((support.supported, support.reason)),
+        Err(error) if client.is_expired() => Err(state.session_error(account_id, client, error)),
+        Err(_) => Ok((false, "无法检测重做状态，请稍后刷新".to_owned())),
     }
 }
 

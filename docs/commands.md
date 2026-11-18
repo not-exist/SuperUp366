@@ -61,9 +61,9 @@ the upstream array order inside each course. The same job under two classes
 yields two rows.
 
 `kind = dictation` is only a candidate hint from a 默写/听写/拼写 title or
-`xotParam.wordDictationType = 0`. It is not paper validation or authorization
-to submit; the job still opens the ordinary read-only answer view while the
-dictation answer and write protocol remain unconfirmed.
+`xotParam.wordDictationType = 0`. It is not paper validation or authorization:
+the job opens the ordinary answer view, and that page offers the dictation
+submit link only when the paper is a pure `question_type` 19/20 paper.
 
 ## Books
 
@@ -122,9 +122,10 @@ shows words with their mastery, or question rows; read-aloud questions
 `AnswerDocument.task_id` is the job's `contentId` — that is what the upstream
 endpoint requires, not the job id. `paper_xml` is kept verbatim for the
 collapsed raw view. `applied_writing` is true when the paper is a pure
-`question_type = 14` paper; the answer page then links to the writing submit
-route. A mixed paper is false, because the writing page refuses to submit the
-non-writing part empty.
+`question_type = 14` paper, and `dictation` is true when it is a pure
+`question_type` 19/20 paper; the answer page then links to the matching submit
+route. Both are false for a mixed paper, because those pages refuse to submit
+the unanswered part empty.
 
 ## Applied writing (应用文)
 
@@ -155,6 +156,44 @@ and stores it in a single-use token together with the job's `contentId`,
 `xot-api /client/onlinetesting/submit` with `testId` and `taskId` set to
 `contentId`, then reads the account-wide finished list back. No score is sent:
 the server grades the essay. Expired jobs are warned about, not blocked.
+
+When the job is already submitted, `applied_writing_get` also probes
+`xot-api /client/onlinemarking/alldata` for `testInfo.parameters.reTest`. If
+the paper supports a retest, `applied_writing_preview` accepts a new answer and
+sets `retest = true`; `applied_writing_submit` then calls
+`homework-api /client/homework/test/redo` (`{testId, returnType: "1"}`) before
+posting and returns `retested = true` without reading the old finished row
+back. Redo code 1 becomes `retest_closed` and any other non-zero code becomes
+`retest_unsupported`; in both cases the previous attempt is untouched.
+
+## Dictation (默写)
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `dictation_get` | `account_id, job_id` | `DictationTask` (detected 19/20 questions) |
+| `dictation_preview` | `account_id, job_id, answers[{question_id, text}], duration_sec` | `DictationPreview` (answer XML + `confirm_token`) |
+| `dictation_submit` | `confirm_token` | `DictationSubmit` |
+
+`dictation_get` keeps only `question_type = 19` (篇章默写) and `20`
+(句子默写). A mixed paper reports `other_questions > 0` and is refused by
+`dictation_preview` with `unsupported`. The answer document matches the XOT
+engine:
+
+```xml
+<elements><element id="…"><answers><![CDATA[text]]></answers></element></elements>
+```
+
+Before the text enters CDATA it is normalised the way the engine does it:
+whitespace runs collapse to one space and `‘ ’` become `'`. An answer that is
+empty after trimming is rejected, because the engine would silently drop the
+question from the document. Submission uses the whole-document route
+(`xot-api /client/onlinetesting/submit`, `testId = taskId = contentId`) and
+sends no `markData`.
+
+Already-submitted jobs follow the writing flow: the get call probes the retest
+flag, preview accepts a new answer when it is `1`, and submit resets the
+attempt through `homework/test/redo` first. `DictationSubmit.retested`
+distinguishes the two outcomes, and a retest does not read the old score back.
 
 ## Word PK
 
