@@ -184,3 +184,24 @@ Still unverified, and the reason to keep the feature read-only:
 as permission to submit or resubmit — only the `test/redo` response is. Do not
 try candidate write routes against a real account. A session rejected with
 `-21/-22/-23` must be reported, with no second login in the same task.
+
+## 14. Homework retest: the native reset
+
+The report page's 重新测试 only hands `textbook.html` to the native bridge
+(`type: "textbook"`, `webCumstomParams.reset`); the page calls no API. For a
+submitted photo/textbook job, replaying the textbook task-score row with the
+same answer and score returns `code 0` and writes nothing: `finish/job/v2`
+keeps its `studyDate` and `batchId`, and `job/info.submitTime` is unchanged.
+
+Two explanations remain:
+
+1. the native bridge performs a reset call before opening the page — its route
+   is unknown and is not `homework/test/redo` (that endpoint returns `-3` for
+   these jobs, and the APK contains no `homework/test` path at all);
+2. the server suppresses an identical answer and would accept genuinely new
+   content, in which case the observed tablet resubmit (a new photo) needs no
+   reset at all.
+
+Resolve with one on-device capture of 重新测试 followed by 提交 (HTTP Canary /
+Reqable / mitmproxy over wireless adb), or by submitting genuinely new content
+to an old unsubmitted job. Do not overwrite a graded answer to test this.

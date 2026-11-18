@@ -388,6 +388,37 @@ and submitted through the ordinary route above, with a fresh `duration` and
 fresh `beginTime`/`endTime`. **[R]** homework page `E()`,
 `testStatusHandle`, `sendReloadTaskList`; `api/homeworkApi` module `7942`.
 
+### The 重新测试 button on the student report
+
+The report SPA (`report.up366.cn`, `StudytaskStudentDefault` chunk) does not
+call an API. `reTest()` hands a payload to the native bridge:
+
+```js
+NetBrowser.downloadResource(JSON.stringify({
+  type: "textbook", fromType: "task",
+  openUrl: "https://student.up366.cn/textbook.html?contentId=" + taskId,
+  contentId, bookName, paperId, testName,
+  webCumstomParams: { bookId, chapterId, reset: 0, studyTaskId, courseId, stageId, paperId },
+  extParams: { xotParam },
+}))
+```
+
+`reset` only clears the page's local draft (`option.reset == 1` drops the
+localStorage copy); it is not a server reset. The page then submits through the
+textbook branch: `submitAnswerData("textbook", …)` → `uploadTaskScore` →
+`study-api /client/task/score/submit/v2` with
+`result = {studentid, testInfo:{answerdata, markdatao}}`,
+`qstJson: ""` and `submitType = studyTaskId ? 4 : 0`. **[R]**
+
+The APK's URL pool contains no `homework-api` or `homework/test` path, so the
+native reset behind this button is not `homework/test/redo`. **[R]**
+
+A replay of that textbook row for an already-submitted job (same answer XML,
+same score 93 / percent 100, fresh `batchId`, `submitType = 4`, PC `ut`)
+returned `code 0` and changed neither `finish/job/v2` (`studyDate`,
+`batchId`) nor `job/info.submitTime`. Identical content may be suppressed as a
+duplicate; new content was not tried on a graded job. **[S]** 2026-11-18
+
 ### Live evidence (2026-11-18)
 
 A logged-in probe asked the engine about every submitted dictation candidate in
@@ -408,23 +439,6 @@ never hosted answers code 1, so `probe_retest` now reports "该作业没有在�
 A successful redo can therefore only be observed on a job with a live XOT test
 record (opened and submitted online). None exists in the 2026-11-17 snapshot of
 this account, so the accepted path stays unobserved.
-
-A second live attempt on 2026-11-18 targeted the two jobs the account owner
-redid in the Android app (both pure type-19 photo answers, scores 93 and 84):
-
-- `homework/test/redo` returns `-3 no_data` for both;
-- `onlinetesting/start`, `onlinetesting/alldata` and
-  `onlinemarking/alldata` answer `测验不存在` for `contentId`, `jobId`,
-  `paperId`, `batchId`, `studyTaskPid`, `assignId` and `assignItemId`;
-- `onlinetesting/submit` with the stored answer XML returns `code 0` but
-  leaves `answer/detail.submitDate` untouched;
-- the PC textbook row (`submitType = 4`, `tasksJson` + `ut` from the textbook
-  player) also returns `code 0` and leaves `submitDate` untouched.
-
-The Android resubmit therefore used neither the XOT redo nor the textbook
-task-score row; the remaining candidate is the OCR/answer-sheet submit
-(`/client/ocr/mark/submit-v2`), whose payload is not reconstructed. Scores,
-answers and submit times were unchanged by these attempts. **[S]**
 
 What is *not* a resubmit:
 
