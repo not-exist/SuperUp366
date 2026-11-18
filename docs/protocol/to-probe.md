@@ -160,9 +160,14 @@ Resolved by client material on 2026-11-18 (all **[R]**, no live write):
 
 Still unverified, and the reason to keep the feature read-only:
 
-1. No end-to-end live run on a `reTest=1` job: the reset followed by a second
-   submit has never been observed from this client. The stored session expired
-   (`-23 找不到tgt`) on 2026-11-18; resuming needs one authorised login.
+1. No end-to-end live run on a job that actually has an XOT test record. The
+   re-login on 2026-11-18 succeeded, but every submitted dictation candidate in
+   this account is a photo/custom-sheet assignment: `onlinemarking/alldata` and
+   `onlinetesting/alldata` answer `code 1 测验不存在` for `contentId`,
+   `jobId` and `paperId`, `homework/test/info` answers `-3 no_data`, and
+   `answer/detail/v2` has no stored answer. The reset plus second submit stays
+   unobserved until a job with a live test record is available (or the job that
+   was redone in the Android app is named).
 2. `onlinetesting/alldata` `{testId: contentId, uid}` is still unconfirmed live
    for a type-19 job (the 2026-11-17 attempt returned 测验不存在 — likely the wrong
    call shape, since the H5 page calls it with `testId` and `uid`).
@@ -170,7 +175,8 @@ Still unverified, and the reason to keep the feature read-only:
    never emits. Whether that node is server normalisation or comes from a
    different client is unresolved.
 4. Whether `test/redo` accepts a type-19/20 dictation paper at all, and which
-   code a real 默写 job returns.
+   code a real 默写 job returns. Blocked by the same missing test record: the
+   existing candidates answer 测验不存在 before any redo is attempted.
 5. `submitType`, `killStudyTask` and `qstJson` on the gzip task-score route stay
    unknown; they are only needed if the per-question textbook path is built.
 

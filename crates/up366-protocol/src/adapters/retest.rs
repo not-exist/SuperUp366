@@ -40,9 +40,22 @@ pub enum RedoOutcome {
 /// `uid`.
 pub async fn probe_retest(client: &Client, test_id: &str, uid: i64) -> Result<RetestSupport> {
     let endpoint = super::endpoint("onlinemarking_alldata")?;
-    let data = client
+    let data = match client
         .call(endpoint, &[("testId", json!(test_id)), ("uid", json!(uid))])
-        .await?;
+        .await
+    {
+        Ok(data) => data,
+        // The engine answers "测验不存在!" (1) for a paper it never hosted;
+        // `homework/test/info` answers -3/no_data for the same job. Both mean
+        // "this job has no online-test record", not "the probe failed".
+        Err(ProtocolError::Api { code: 1, .. } | ProtocolError::Api { code: -3, .. }) => {
+            return Ok(RetestSupport {
+                supported: false,
+                reason: "该作业没有在线测验记录，不支持重做".to_owned(),
+            })
+        }
+        Err(error) => return Err(error),
+    };
     let data = data.unwrap_or(Value::Null);
     let re_test = data.pointer("/testInfo/parameters").and_then(re_test_value);
     Ok(match re_test {
@@ -181,6 +194,22 @@ mod tests {
             .unwrap();
         assert!(!support.supported);
         assert_eq!(support.reason, "服务端未返回重做配置");
+    }
+
+    #[tokio::test]
+    async fn a_missing_test_record_is_not_supported() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path("/client/onlinemarking/alldata");
+            then.status(200)
+                .json_body(json!({ "result": { "code": 1, "msg": "测验不存在!" } }));
+        });
+
+        let support = probe_retest(&client(&server), "CONTENT-1", 1)
+            .await
+            .unwrap();
+        assert!(!support.supported);
+        assert_eq!(support.reason, "该作业没有在线测验记录，不支持重做");
     }
 
     #[tokio::test]

@@ -388,6 +388,27 @@ and submitted through the ordinary route above, with a fresh `duration` and
 fresh `beginTime`/`endTime`. **[R]** homework page `E()`,
 `testStatusHandle`, `sendReloadTaskList`; `api/homeworkApi` module `7942`.
 
+### Live evidence (2026-11-18)
+
+A logged-in probe asked the engine about every submitted dictation candidate in
+this account (13 jobs, all `paperType = 5`, `pastExercise = 1`) and five
+unsubmitted strict candidates:
+
+- `onlinemarking/alldata` with `testId` set to the job's `contentId`,
+  `jobId` or `paperId` returns `result.code = 1` / `测验不存在!` for every
+  one; `homework/test/info` returns `-3` / `no_data`.
+- `answer/detail/v2` for the same jobs returns `-3` / `no_data`, so even the
+  stored answer is unreachable.
+
+Those jobs are photo/custom-sheet assignments: they never had an XOT online-test
+record, and `homework/test/redo` does not apply to them. A paper the engine
+never hosted answers code 1, so `probe_retest` now reports "该作业没有在线测验
+记录，不支持重做" instead of a probe failure. **[S]**
+
+A successful redo can therefore only be observed on a job with a live XOT test
+record (opened and submitted online). None exists in the 2026-11-17 snapshot of
+this account, so the accepted path stays unobserved.
+
 What is *not* a resubmit:
 
 - Re-posting `onlinetesting/submit` without `test/redo`. On 2026-11-09 a live
