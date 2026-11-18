@@ -134,12 +134,47 @@ Additional read-only evidence gathered 2026-11-17:
   for applied-writing type 14 only. The saved real-submit fixtures cover type 4
   on the gzip task-score route; none contain type 19.
 
-Still unverified: which of those write routes the type-19 homework uses,
-submittable ID mapping, exact type-19 input-to-answer XML (including whether
-`<pictures>` and `markData` are sent), request fields, and duplicate/returned/
-retest behavior. No dedicated resubmit API is evidenced. `reTest`, `taskStatus`,
-`submitTime`, and `disabledOnline` must not be treated as permission to submit
-or resubmit. Keep the feature read-only until the type-19 serializer and write
-call site are evidenced in official client material; do not try candidate write
-routes against a real account. A session rejected with `-21/-22/-23` must be
-reported, with no second login in the same task.
+Resolved by client material on 2026-11-18 (all **[R]**, no live write):
+
+- The type-19/20 serialiser is `getQstXML`/`getPaperXML`:
+  `<element id="…"><answers><![CDATA[answerText]]></answers></element>`, with no
+  `<pictures>`; an empty answer drops the element. `markData` is built only from
+  a question's `pigaiData`, so an ordinary homework submit carries none.
+- The homework page submits the whole document to
+  `xot-api /client/onlinetesting/submit` with
+  `{testId, paperId, uid, answerData, duration}` (form-urlencoded, no `ut`, no
+  gzip). Inside the app shell the native uploader adds
+  `beginTime`/`endTime`/`playData`/`timeData`. `testId` is the job's
+  `contentId`.
+- The APK has no native dictation or redo path: 默写/听写/重做 do not occur in its
+  resources, and the same H5 homework page runs in
+  `com.up366.mobile.course.task.JsSdk2023TaskActivity`. The redo call is made by
+  the page's JavaScript, which is why the endpoint is absent from the APK's
+  (partly encrypted) URL pool.
+- Retest has a dedicated endpoint:
+  `homework-api /client/homework/test/redo` with `{testId, returnType: "1"}`,
+  enabled only when `onlinemarking/alldata → testInfo.parameters.reTest == 1`.
+  Codes: 0 accepted, 1 already closed, anything else unsupported.
+- No other resubmit route exists. `reTest` also appears on never-submitted jobs
+  (88 of 173), so it is a template/config flag, not a permission.
+
+Still unverified, and the reason to keep the feature read-only:
+
+1. No end-to-end live run on a `reTest=1` job: the reset followed by a second
+   submit has never been observed from this client. The stored session expired
+   (`-23 找不到tgt`) on 2026-11-18; resuming needs one authorised login.
+2. `onlinetesting/alldata` `{testId: contentId, uid}` is still unconfirmed live
+   for a type-19 job (the 2026-11-17 attempt returned 测验不存在 — likely the wrong
+   call shape, since the H5 page calls it with `testId` and `uid`).
+3. The stored type-19 answer contains `<pictures></pictures>`, which this engine
+   never emits. Whether that node is server normalisation or comes from a
+   different client is unresolved.
+4. Whether `test/redo` accepts a type-19/20 dictation paper at all, and which
+   code a real 默写 job returns.
+5. `submitType`, `killStudyTask` and `qstJson` on the gzip task-score route stay
+   unknown; they are only needed if the per-question textbook path is built.
+
+`reTest`, `taskStatus`, `submitTime` and `disabledOnline` must never be treated
+as permission to submit or resubmit — only the `test/redo` response is. Do not
+try candidate write routes against a real account. A session rejected with
+`-21/-22/-23` must be reported, with no second login in the same task.
