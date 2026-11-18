@@ -409,6 +409,23 @@ A successful redo can therefore only be observed on a job with a live XOT test
 record (opened and submitted online). None exists in the 2026-11-17 snapshot of
 this account, so the accepted path stays unobserved.
 
+A second live attempt on 2026-11-18 targeted the two jobs the account owner
+redid in the Android app (both pure type-19 photo answers, scores 93 and 84):
+
+- `homework/test/redo` returns `-3 no_data` for both;
+- `onlinetesting/start`, `onlinetesting/alldata` and
+  `onlinemarking/alldata` answer `测验不存在` for `contentId`, `jobId`,
+  `paperId`, `batchId`, `studyTaskPid`, `assignId` and `assignItemId`;
+- `onlinetesting/submit` with the stored answer XML returns `code 0` but
+  leaves `answer/detail.submitDate` untouched;
+- the PC textbook row (`submitType = 4`, `tasksJson` + `ut` from the textbook
+  player) also returns `code 0` and leaves `submitDate` untouched.
+
+The Android resubmit therefore used neither the XOT redo nor the textbook
+task-score row; the remaining candidate is the OCR/answer-sheet submit
+(`/client/ocr/mark/submit-v2`), whose payload is not reconstructed. Scores,
+answers and submit times were unchanged by these attempts. **[S]**
+
 What is *not* a resubmit:
 
 - Re-posting `onlinetesting/submit` without `test/redo`. On 2026-11-09 a live
