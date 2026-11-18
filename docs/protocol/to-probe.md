@@ -202,6 +202,12 @@ Two explanations remain:
    content, in which case the observed tablet resubmit (a new photo) needs no
    reset at all.
 
+The two named jobs differ: one stored answer is text (1136 B,
+`<pictures></pictures>`), the other carries a picture URL. That fits an
+answer-sheet/OCR pipeline that turns one submission into text and keeps the
+other as a photo, so a text answer alone does not prove a text-only submit
+route.
+
 Resolve with one on-device capture of 重新测试 followed by 提交 (HTTP Canary /
 Reqable / mitmproxy over wireless adb), or by submitting genuinely new content
 to an old unsubmitted job. Do not overwrite a graded answer to test this.
