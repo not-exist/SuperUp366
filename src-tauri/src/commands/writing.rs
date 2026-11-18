@@ -6,17 +6,14 @@
 //! the writing part. The submit is the H5 player's branch
 //! (`xot-api /client/onlinetesting/submit`), not the read-aloud score row.
 
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use up366_core::AccountId;
 use up366_protocol::adapters::{
     self, build_answer_data, parse_applied_writing, submit_applied_writing, AppliedWritingPaper,
-    AppliedWritingSubmission, WritingAnswer,
+    AppliedWritingSubmission, RedoOutcome, WritingAnswer,
 };
-use up366_protocol::dto::Job;
 
-use crate::commands::{find_job, is_job_submitted, uid_for, verify_finished_job};
+use crate::commands::{load_paper_context, retest_state, uid_for, verify_finished_job};
 use crate::error::{AppError, CommandResult};
 use crate::session::AppState;
 
@@ -40,6 +37,10 @@ pub struct AppliedWritingTaskView {
     pub job_id: String,
     pub title: String,
     pub submitted: bool,
+    /// Whether the server will accept a retest for this submitted job.
+    pub retest_supported: bool,
+    /// Why a retest is unavailable; empty when it is available.
+    pub retest_reason: String,
     /// Expired jobs are not blocked here; the UI only warns.
     pub expired: bool,
     pub total_score: f64,
@@ -59,6 +60,8 @@ pub struct AppliedWritingPreviewView {
     pub job_id: String,
     pub title: String,
     pub total_score: f64,
+    /// The submission will reset the previous attempt first.
+    pub retest: bool,
     pub answers: Vec<PreviewAnswerView>,
     /// The exact `answerData` XML a submission would carry.
     pub answer_data: String,
@@ -80,6 +83,8 @@ pub struct AppliedWritingSubmitView {
     pub ok: bool,
     /// Whether the account-wide finished list already shows the job.
     pub verified: bool,
+    /// The submission was a retest: the previous attempt was reset first.
+    pub retested: bool,
     pub score: Option<f64>,
     pub message: String,
 }
@@ -98,6 +103,8 @@ struct PendingWriting {
     seconds: i64,
     begin_time: i64,
     end_time: i64,
+    /// Reset the previous attempt before posting this document.
+    retest: bool,
 }
 
 struct LoadedWriting {
@@ -108,6 +115,8 @@ struct LoadedWriting {
     content_id: String,
     paper: AppliedWritingPaper,
     submitted: bool,
+    retest_supported: bool,
+    retest_reason: String,
     expired: bool,
 }
 
@@ -134,12 +143,21 @@ pub async fn applied_writing_preview(
 ) -> CommandResult<AppliedWritingPreviewView> {
     let (account_id, client) = state.require_client(Some(&account_id))?;
     let loaded = load_writing(&state, &account_id, &client, &job_id).await?;
-    if loaded.submitted {
-        return Err(AppError::new(
-            "duplicate_submission",
-            "该作业已提交，不能重复提交",
-        ));
-    }
+    let retest = if loaded.submitted {
+        if !loaded.retest_supported {
+            return Err(AppError::new(
+                "duplicate_submission",
+                if loaded.retest_reason.is_empty() {
+                    "该作业已提交，不能重复提交".to_owned()
+                } else {
+                    format!("该作业已提交，不能重复提交：{}", loaded.retest_reason)
+                },
+            ));
+        }
+        true
+    } else {
+        false
+    };
 
     // Reject an answer for a question that is not in the paper: it would be
     // silently dropped and make the count check misleading.
@@ -184,6 +202,7 @@ pub async fn applied_writing_preview(
         seconds,
         begin_time: end_time.saturating_sub(seconds.saturating_mul(1000)),
         end_time,
+        retest,
     };
     let payload = serde_json::to_value(&pending)
         .map_err(|error| AppError::new("storage_error", error.to_string()))?;
@@ -213,6 +232,7 @@ pub async fn applied_writing_preview(
         job_id: loaded.job_id,
         title: loaded.title,
         total_score: loaded.paper.total_score,
+        retest,
         answers: preview_answers,
         answer_data,
         confirm_token,
@@ -243,6 +263,35 @@ pub async fn applied_writing_submit(
         return Err(AppError::new("confirmation_expired", "确认内容不完整"));
     }
 
+    if pending.retest {
+        match adapters::redo_homework(&client, &pending.content_id)
+            .await
+            .map_err(|error| state.session_error(&account_id, &client, error))?
+        {
+            RedoOutcome::Accepted => {}
+            RedoOutcome::Closed { message } => {
+                return Err(AppError::new(
+                    "retest_closed",
+                    if message.is_empty() {
+                        "练习已经结束，不可以再重新测试".to_owned()
+                    } else {
+                        message
+                    },
+                ))
+            }
+            RedoOutcome::Unsupported { message } => {
+                return Err(AppError::new(
+                    "retest_unsupported",
+                    if message.is_empty() {
+                        "该练习不支持重做".to_owned()
+                    } else {
+                        message
+                    },
+                ))
+            }
+        }
+    }
+
     let submission = AppliedWritingSubmission {
         test_id: pending.content_id.clone(),
         paper_id: pending.paper_id.clone(),
@@ -255,6 +304,18 @@ pub async fn applied_writing_submit(
     submit_applied_writing(&client, &submission)
         .await
         .map_err(|error| state.session_error(&account_id, &client, error))?;
+
+    // A retest reuses the finished row: its score still describes the previous
+    // attempt, so reading it back would report the wrong result.
+    if pending.retest {
+        return Ok(AppliedWritingSubmitView {
+            ok: true,
+            verified: false,
+            retested: true,
+            score: None,
+            message: "已重置上一次作答并重新提交，分数以服务端批改结果为准".to_owned(),
+        });
+    }
 
     let (verified, score, _batch_id) = verify_finished_job(
         &state,
@@ -269,6 +330,7 @@ pub async fn applied_writing_submit(
     Ok(AppliedWritingSubmitView {
         ok: true,
         verified,
+        retested: false,
         score,
         message: if verified {
             "提交成功".to_owned()
@@ -285,60 +347,29 @@ async fn load_writing(
     client: &up366_protocol::Client,
     job_id: &str,
 ) -> CommandResult<LoadedWriting> {
-    let record = find_job(state, account_id, client, job_id).await?;
-    let data: Value = serde_json::from_str(&record.raw_json)
-        .map_err(|error| AppError::new("storage_error", error.to_string()))?;
-    let job = Job::from_value(data).map_err(AppError::from)?;
-
-    let content_id = record
-        .content_id
-        .clone()
-        .or_else(|| job.content().map(str::to_owned))
-        .ok_or_else(|| AppError::new("protocol_drift", "作业缺少 contentId"))?;
-    let book_id = record
-        .book_id
-        .clone()
-        .or_else(|| job.book().map(str::to_owned))
-        .unwrap_or_default();
-    let course_id = record.course_id.as_str().to_owned();
-    let paper_id = match record
-        .paper_id
-        .clone()
-        .or_else(|| job.paper().map(str::to_owned))
-    {
-        Some(paper_id) if !paper_id.is_empty() => paper_id,
-        _ => {
-            let info = adapters::job_info(client, &course_id, job_id, &content_id, &book_id)
-                .await
-                .map_err(|error| state.session_error(account_id, client, error))?;
-            info.paper_id
-                .filter(|paper_id| !paper_id.is_empty())
-                .ok_or_else(|| AppError::new("protocol_drift", "作业缺少 paperId"))?
-        }
-    };
-
-    let detail = adapters::paper_detail(client, &paper_id)
-        .await
-        .map_err(|error| state.session_error(account_id, client, error))?;
-    let paper = parse_applied_writing(&detail.paper_data).map_err(AppError::from)?;
+    let context = load_paper_context(state, account_id, client, job_id).await?;
+    let paper = parse_applied_writing(&context.paper_xml).map_err(AppError::from)?;
     paper.require_all_writing().map_err(AppError::from)?;
-
-    let submitted = is_job_submitted(state, account_id, client, job_id, &course_id, &job).await?;
-    let expired = job
-        .end_time
-        .as_deref()
-        .and_then(up366_core::parse_deadline)
-        .is_some_and(|deadline| deadline < Utc::now());
+    let (retest_supported, retest_reason) = retest_state(
+        state,
+        account_id,
+        client,
+        &context.content_id,
+        context.submitted,
+    )
+    .await?;
 
     Ok(LoadedWriting {
-        job_id: job_id.to_owned(),
-        course_id,
-        title: job.title().to_owned(),
-        paper_id,
-        content_id,
+        job_id: context.job_id,
+        course_id: context.course_id,
+        title: context.title,
+        paper_id: context.paper_id,
+        content_id: context.content_id,
         paper,
-        submitted,
-        expired,
+        submitted: context.submitted,
+        retest_supported,
+        retest_reason,
+        expired: context.expired,
     })
 }
 
@@ -347,6 +378,8 @@ fn task_view(loaded: &LoadedWriting) -> AppliedWritingTaskView {
         job_id: loaded.job_id.clone(),
         title: loaded.title.clone(),
         submitted: loaded.submitted,
+        retest_supported: loaded.retest_supported,
+        retest_reason: loaded.retest_reason.clone(),
         expired: loaded.expired,
         total_score: loaded.paper.total_score,
         questions: loaded
@@ -368,6 +401,7 @@ fn task_view(loaded: &LoadedWriting) -> AppliedWritingTaskView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
     use up366_protocol::adapters::{AppliedWritingPaper, WritingQuestion};
 
     fn loaded() -> LoadedWriting {
@@ -390,6 +424,8 @@ mod tests {
                 total_score: 15.0,
             },
             submitted: false,
+            retest_supported: false,
+            retest_reason: String::new(),
             expired: false,
         }
     }
@@ -417,6 +453,7 @@ mod tests {
             seconds: 42,
             begin_time: 1_700_000_000_000,
             end_time: 1_700_000_042_000,
+            retest: false,
         };
         let value: Value = serde_json::to_value(&pending).unwrap();
         let back: PendingWriting = serde_json::from_value(value).unwrap();

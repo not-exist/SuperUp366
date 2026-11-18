@@ -17,11 +17,10 @@
 //! would silently burn the task.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use super::paper::{parse_questions, plain_text};
 use crate::client::Client;
-use crate::endpoint::get;
 use crate::error::{ProtocolError, Result};
 
 /// `question_type` of an applied-writing question.
@@ -197,32 +196,19 @@ pub async fn submit_applied_writing(
     client: &Client,
     submission: &AppliedWritingSubmission,
 ) -> Result<Value> {
-    let endpoint = get("onlinetesting_submit")
-        .ok_or_else(|| ProtocolError::Decode("missing endpoint: onlinetesting_submit".into()))?;
-    let data = client
-        .call(
-            endpoint,
-            &[
-                ("testId", json!(submission.test_id)),
-                // The Electron queue stores `taskId` and copies it into
-                // `testId` on send; both are the job's content id.
-                ("taskId", json!(submission.test_id)),
-                ("paperId", json!(submission.paper_id)),
-                ("uid", json!(submission.uid)),
-                ("answerData", json!(submission.answer_data)),
-                ("duration", json!(submission.duration.max(1))),
-                ("beginTime", json!(submission.begin_time)),
-                ("endTime", json!(submission.end_time)),
-                ("studyDate", json!("")),
-                ("playData", json!("")),
-                ("timeData", json!("")),
-                ("uploaded", json!(0)),
-                ("failed", json!(0)),
-                ("msg", json!("")),
-            ],
-        )
-        .await?;
-    Ok(data.unwrap_or(Value::Null))
+    super::onlinetesting::submit_document(
+        client,
+        &super::onlinetesting::DocumentSubmission {
+            test_id: submission.test_id.clone(),
+            paper_id: submission.paper_id.clone(),
+            uid: submission.uid,
+            answer_data: submission.answer_data.clone(),
+            duration: submission.duration,
+            begin_time: submission.begin_time,
+            end_time: submission.end_time,
+        },
+    )
+    .await
 }
 
 /// Escape a value placed inside a double-quoted XML attribute.
@@ -244,6 +230,7 @@ mod tests {
     use super::*;
     use crate::adapters::test_support::{client, ok};
     use httpmock::prelude::*;
+    use serde_json::json;
 
     const PAPER: &str = r#"<elements>
         <element id="1" type="0"><element_caption><![CDATA[应用文练习]]></element_caption></element>

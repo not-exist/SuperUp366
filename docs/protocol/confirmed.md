@@ -45,6 +45,11 @@ URL once with `?ticket=<st>` (or `&ticket=` when a query already exists).
 | Job history | `studytask-api /client/student/all/course/range/job` (`data[]`) |
 | Job detail | `studytask-api /client/student/job/info` (`studyTaskId = jobId`) |
 | Homework submit | `xot-api /client/onlinetesting/submit` (whole answer document) |
+| Homework test info | `homework-api /client/homework/test/info` (`{testId}` → `testInfo`) |
+| Homework redo | `homework-api /client/homework/test/redo` (`{testId, returnType}`) |
+| Online-test load | `xot-api /client/onlinetesting/alldata` (`{testId, uid}`) |
+| Online-test start / tempsave | `xot-api /client/onlinetesting/start`, `/client/onlinetesting/tempsave` |
+| Online marking | `xot-api /client/onlinemarking/alldata` (`{testId, uid}` → `testInfo.parameters.reTest`) |
 | Finished/returned | `studytask-api /client/student/all/course/finish/job/v2` |
 | Finished scores | `dsb-api /client/book/finished-task/list` |
 | Books (purchased) | `book-api /client/books/buy-book` |
@@ -270,6 +275,188 @@ are live; a live submission from this client has not been recorded yet (see
   the engine shape above. **[S]** read-only, 2026-11-16.
 - Completion: the job appears in `/client/student/all/course/finish/job/v2`
   with its score after the server grades the essay.
+
+## Dictation / memorisation homework (XOT engine)
+
+The official H5 XOT bundle has separate question constants and editor modules for
+`question_type = 19` (`篇章默写`) and `question_type = 20` (`句子默写`). The
+`ChapterDictation.Testing` and `SentenceDictation.Testing` components keep the
+student input in `userData.answerText` (with an empty `pictures` array), update
+it on textarea input/blur, and publish it through the common `stateChange`
+event. **[R]** H5 `common-xot-test.<hash>.js` / `chunk-<hash>.js`.
+
+The same bundle's `getQstXML` / `getPaperXML` serialiser handles both types 19
+and 20 as:
+
+```xml
+<element id="…"><answers><![CDATA[answerText]]></answers></element>
+```
+
+An empty answer produces no element. Unlike the writing/image branch, the 19/20
+branch does not append a `<pictures>` node. **[R]** H5
+`common-xot-test.<hash>.js`, `getQstXML` and `getPaperXML`.
+
+`getSubmitData()` returns `{userAnswer, markData, finishedRatio,
+finishedNumObj, totalScore, markObj, rightQstIds, wrongQstIds, sWordId,
+scoreRatio, score}`; `userAnswer` is the document above. `markData` is only
+built from a question's `pigaiData` (the AI-marking response), so a normal
+homework submit has none for 19/20; the type-19/20 mark evaluator is a separate
+function and is not invoked by `getSubmitData`. **[R]** H5
+`common-xot-test.<hash>.js` `getSubmitData`/`getQstMarkDataXML`.
+
+Three serialiser details matter for a reimplementation:
+
+- `questionType` is compared as a **string**. A numeric `19` falls through the
+  engine's branches and the answer is silently dropped.
+- Text is normalised before it enters CDATA: runs of whitespace collapse to one
+  space and the typographic quotes `‘ ’` become `'`.
+- An answer whose trimmed text is empty produces **no** `<element>`; an entirely
+  empty document has three forms chosen by a flag: `""`, `<elements></elements>`
+  and `<elements/>`. **[R]** Electron `app.<hash>.js` `getPaperXML(_, flag)`.
+
+### Submission
+
+The homework page submits the whole document to
+
+```
+POST https://xot-api.up366.cn/client/onlinetesting/submit   (form-urlencoded)
+```
+
+with
+
+| Field | Value |
+| --- | --- |
+| `testId` | the page's `testId`, i.e. the job's `contentId` |
+| `paperId` | `paperInfo.paperId` |
+| `uid` | student id |
+| `answerData` | `getSubmitData().userAnswer` |
+| `duration` | seconds spent, `-1` before the first tick |
+
+The web page sends exactly these five fields. Inside the Android/Electron shell
+the page hands `{testId, paperId, startTime, submitTime, duration,
+userAnswerXmlStr}` to the native uploader, which maps `userAnswerXmlStr` to
+`answerData`, `startTime` to `beginTime`, `submitTime` to `endTime` and adds
+`playData`, `timeData`, `uploaded`, `failed`, `msg`, `studyDate`. No `ut`, no
+gzip and no `markData` are sent on either branch. **[R]** homework page
+`paperSubmit`/`submitAnswerData`; Electron `main-window.js`.
+
+The H5 axios instance used by this page defaults to
+`Content-Type: application/x-www-form-urlencoded; charset=utf-8`,
+`transformRequest: qs.stringify`, `withCredentials: true` and
+`X-Requested-With: XMLHttpRequest`, and resolves only `result.code` 0 or -24
+as success. **[R]** `chunk-vendors` module `4123`.
+
+`answer/detail/v2` normalises a stored 19/20 answer to
+`<answers>'<![CDATA[text]]>'</answers><pictures></pictures>`. The engine that
+produced the submitted XML never emits an empty `<pictures>` node, so the stored
+form is server-side normalisation (or a different client), not the wire shape.
+**[S]** read-only 2026-11-17, re-check pending.
+
+## Homework retest (重做 / 重新提交)
+
+`reTest` is a server-provided job flag: it arrives in the job's
+`extParam.xotParam` (797 cached jobs: 385 carry the key, 173 of them `1`, and
+88 of those are jobs that were never submitted). It is a **template/config
+flag, not a permission**; only the server's answer to the redo call decides.
+
+The report view reads `POST xot-api /client/onlinemarking/alldata` with
+`{testId: contentId, uid}`, takes `data.testInfo.parameters` (a JSON string),
+parses it with `getStrObj` (which coerces `reTest`, `questionRandom`,
+`optionRandom`, `showOralScore`, `question_render_type`, `manualAudit` to
+numbers) and shows 重新测试 only when `!isTestEnd && reTest == 1`. **[R]**
+homework page `reportHandle`.
+
+Pressing it calls
+
+```
+POST https://homework-api.up366.cn/client/homework/test/redo   (form-urlencoded)
+
+testId=<contentId>&returnType=1
+```
+
+| `result.code` | Meaning | UI text |
+| --- | --- | --- |
+| `0` | reset accepted | page reloads the test |
+| `1` | practice already closed | 练习已经结束，不可以再重新测试 |
+| other | not supported for this paper | 该练习不支持重做 |
+
+On `0` the page calls `POST xot-api /client/onlinetesting/alldata`
+`{testId, uid}` again (`testStatusHandle`), which returns the reset
+`userAnswer.testStatus`/`paperId`, and posts `reloadTaskList` to
+`window.opener` so the surrounding list refreshes. The paper is then answered
+and submitted through the ordinary route above, with a fresh `duration` and
+fresh `beginTime`/`endTime`. **[R]** homework page `E()`,
+`testStatusHandle`, `sendReloadTaskList`; `api/homeworkApi` module `7942`.
+
+### The 重新测试 button on the student report
+
+The report SPA (`report.up366.cn`, `StudytaskStudentDefault` chunk) does not
+call an API. `reTest()` hands a payload to the native bridge:
+
+```js
+NetBrowser.downloadResource(JSON.stringify({
+  type: "textbook", fromType: "task",
+  openUrl: "https://student.up366.cn/textbook.html?contentId=" + taskId,
+  contentId, bookName, paperId, testName,
+  webCumstomParams: { bookId, chapterId, reset: 0, studyTaskId, courseId, stageId, paperId },
+  extParams: { xotParam },
+}))
+```
+
+`reset` only clears the page's local draft (`option.reset == 1` drops the
+localStorage copy); it is not a server reset. The page then submits through the
+textbook branch: `submitAnswerData("textbook", …)` → `uploadTaskScore` →
+`study-api /client/task/score/submit/v2` with
+`result = {studentid, testInfo:{answerdata, markdatao}}`,
+`qstJson: ""` and `submitType = studyTaskId ? 4 : 0`. **[R]**
+
+The APK's URL pool contains no `homework-api` or `homework/test` path, so the
+native reset behind this button is not `homework/test/redo`. **[R]**
+
+A replay of that textbook row for an already-submitted job (same answer XML,
+same score 93 / percent 100, fresh `batchId`, `submitType = 4`, PC `ut`)
+returned `code 0` and changed neither `finish/job/v2` (`studyDate`,
+`batchId`) nor `job/info.submitTime`. Identical content may be suppressed as a
+duplicate; new content was not tried on a graded job. **[S]** 2026-11-18
+
+### Live evidence (2026-11-18)
+
+A logged-in probe asked the engine about every submitted dictation candidate in
+this account (13 jobs, all `paperType = 5`, `pastExercise = 1`) and five
+unsubmitted strict candidates:
+
+- `onlinemarking/alldata` with `testId` set to the job's `contentId`,
+  `jobId` or `paperId` returns `result.code = 1` / `测验不存在!` for every
+  one; `homework/test/info` returns `-3` / `no_data`.
+- `answer/detail/v2` for the same jobs returns `-3` / `no_data`, so even the
+  stored answer is unreachable.
+
+Those jobs are photo/custom-sheet assignments: they never had an XOT online-test
+record, and `homework/test/redo` does not apply to them. A paper the engine
+never hosted answers code 1, so `probe_retest` now reports "该作业没有在线测验
+记录，不支持重做" instead of a probe failure. **[S]**
+
+A successful redo can therefore only be observed on a job with a live XOT test
+record (opened and submitted online). None exists in the 2026-11-17 snapshot of
+this account, so the accepted path stays unobserved.
+
+What is *not* a resubmit:
+
+- Re-posting `onlinetesting/submit` without `test/redo`. On 2026-11-09 a live
+  re-post for a `reTest=0` job returned `code 0` and changed nothing:
+  `answer/detail/v2` kept the old `submitDate` and `finish/job/v2` kept the old
+  score row. A `0` from the submit endpoint does not prove the attempt was
+  recorded. **[S]**
+- `submitType`, `killStudyTask`, `qstJson` and the gzip task-score route belong
+  to the per-question textbook flow, not to this whole-document retest.
+
+No other retest/resubmit path exists in the client material: the APK's 190
+`up366.cn` URL constants contain no retest/redo/resubmit route (the redo call is
+made by the H5 page, not by native code), and the H5 bundles contain exactly the
+two endpoints above. **[R]** APK string pool; H5 `homework.<hash>.js`.
+
+The gate, the reset and the re-submit have not been observed end to end against
+a live `reTest=1` job from this client; that is the remaining [S] gap.
 
 ## Error-notebook: correction
 

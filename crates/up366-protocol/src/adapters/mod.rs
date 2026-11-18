@@ -9,9 +9,12 @@ pub mod answers;
 pub mod books;
 pub mod catalog;
 pub mod correction;
+pub mod dictation;
+pub mod onlinetesting;
 mod paper;
 pub mod profile;
 pub mod readaloud;
+pub mod retest;
 pub mod wordpk;
 pub mod words;
 pub mod writing;
@@ -29,11 +32,17 @@ pub use correction::{
     mark_xml, qst_json, submit_correction, CorrectionAnswer, CorrectionContext, CorrectionGroup,
     CorrectionOverview, CorrectionPaper, CorrectionQuestion, CorrectionStatus,
 };
+pub use dictation::{
+    build_answer_data as build_dictation_answer_data, normalise_answer, parse_dictation,
+    DictationAnswer, DictationPaper, DictationQuestion, DICTATION_QUESTION_TYPES,
+};
+pub use onlinetesting::{submit_document, DocumentSubmission};
 pub use profile::{current_user, server_time, CurrentUser};
 pub use readaloud::{
     build_row, parse_paper, submit_readaloud, upload_object, upload_ticket, PaperQuestion,
     ReadAloudContext, ReadAloudPaper, ReadAloudRecording, UploadTicket, READALOUD_SUBMIT_TYPE,
 };
+pub use retest::{probe_retest, redo_homework, RedoOutcome, RetestSupport};
 pub use wordpk::{submit_word_pk, WordPkSubmission};
 pub use words::bucket_words;
 pub use writing::{

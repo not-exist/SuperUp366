@@ -321,9 +321,27 @@ impl Job {
     pub fn kind(&self) -> up366_core::JobKind {
         if self.is_word_pk() {
             up366_core::JobKind::WordPk
+        } else if self.is_dictation_hint() {
+            up366_core::JobKind::Dictation
         } else {
             up366_core::JobKind::hint_from_title(self.title())
         }
+    }
+
+    /// Whether metadata or the title suggests a dictation-style assignment.
+    /// This is only a list/filter hint, not proof of a supported paper or write API.
+    pub fn is_dictation_hint(&self) -> bool {
+        if up366_core::JobKind::hint_from_title(self.title()) == up366_core::JobKind::Dictation {
+            return true;
+        }
+        self.xot_param()
+            .and_then(|xot| xot.get("wordDictationType"))
+            .and_then(|value| match value {
+                Value::Number(number) => number.as_i64(),
+                Value::String(text) => text.trim().parse().ok(),
+                _ => None,
+            })
+            == Some(0)
     }
 
     /// Cheap hint that a job contains read-aloud questions.
@@ -1097,6 +1115,44 @@ mod tests {
         .unwrap();
         assert!(!job.is_word_pk());
         assert_eq!(job.kind(), up366_core::JobKind::Unknown);
+    }
+
+    #[test]
+    fn dictation_candidate_uses_title_or_nested_word_dictation_type() {
+        let by_title = Job::from_value(json!({
+            "jobId": "JOB-D1",
+            "jobName": "Unit 1 课文默写",
+            "extParam": {}
+        }))
+        .unwrap();
+        assert!(by_title.is_dictation_hint());
+        assert_eq!(by_title.kind(), up366_core::JobKind::Dictation);
+
+        let by_numeric_flag = Job::from_value(json!({
+            "jobId": "JOB-D2",
+            "jobName": "Unit 2 作业",
+            "extParam": "{\"xotParam\":\"{\\\"wordDictationType\\\":0}\"}"
+        }))
+        .unwrap();
+        assert!(by_numeric_flag.is_dictation_hint());
+        assert_eq!(by_numeric_flag.kind(), up366_core::JobKind::Dictation);
+
+        let by_string_flag = Job::from_value(json!({
+            "jobId": "JOB-D3",
+            "jobName": "Unit 3 作业",
+            "extParam": {"xotParam": {"wordDictationType": "0"}}
+        }))
+        .unwrap();
+        assert!(by_string_flag.is_dictation_hint());
+
+        let unrelated = Job::from_value(json!({
+            "jobId": "JOB-D4",
+            "jobName": "Unit 4 阅读理解",
+            "extParam": {"xotParam": {"wordDictationType": 1}}
+        }))
+        .unwrap();
+        assert!(!unrelated.is_dictation_hint());
+        assert_eq!(unrelated.kind(), up366_core::JobKind::Unknown);
     }
 
     #[test]

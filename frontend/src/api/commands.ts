@@ -74,6 +74,26 @@ export const api = {
   submitAppliedWriting: (confirmToken: string) =>
     invokeCommand("applied_writing_submit", { confirm_token: confirmToken }),
 
+  getDictation: (accountId: string, jobId: string) =>
+    invokeCommand("dictation_get", {
+      account_id: accountId,
+      job_id: jobId,
+    }),
+  previewDictation: (
+    accountId: string,
+    jobId: string,
+    answers: { question_id: string; text: string }[],
+    durationSec: number,
+  ) =>
+    invokeCommand("dictation_preview", {
+      account_id: accountId,
+      job_id: jobId,
+      answers,
+      duration_sec: durationSec,
+    }),
+  submitDictation: (confirmToken: string) =>
+    invokeCommand("dictation_submit", { confirm_token: confirmToken }),
+
   previewWordPk: (accountId: string, jobId: string, score: number, total: number) =>
     invokeCommand("wordpk_preview", {
       account_id: accountId,

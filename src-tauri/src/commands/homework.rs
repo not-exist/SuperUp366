@@ -41,6 +41,8 @@ pub struct AnswerDocumentView {
     /// The paper is a pure applied-writing paper, so the writing page can
     /// submit it even when the job title did not advertise the category.
     pub applied_writing: bool,
+    /// The paper is a pure dictation paper (`question_type` 19/20).
+    pub dictation: bool,
 }
 
 /// The ids the answer endpoint needs for one job.
@@ -124,6 +126,9 @@ fn build_view(job_id: String, task_id: String, detail: &AnswerDetail) -> AnswerD
     let applied_writing = adapters::parse_applied_writing(paper_xml)
         .map(|paper| paper.require_all_writing().is_ok())
         .unwrap_or(false);
+    let dictation = adapters::parse_dictation(paper_xml)
+        .map(|paper| paper.require_all_dictation().is_ok())
+        .unwrap_or(false);
     AnswerDocumentView {
         job_id,
         task_id,
@@ -132,6 +137,7 @@ fn build_view(job_id: String, task_id: String, detail: &AnswerDetail) -> AnswerD
         questions: Vec::new(),
         paper_xml: paper_xml.to_owned(),
         applied_writing,
+        dictation,
     }
 }
 

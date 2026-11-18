@@ -69,6 +69,7 @@ const QLIB_API: &str = "https://qlib-api.up366.cn";
 const XOT_API: &str = "https://xot-api.up366.cn";
 const WORDS_V2_API: &str = "https://words-v2-api.up366.cn";
 const WORDSBTL_API: &str = "https://wordsbtl-api.up366.cn";
+const HOMEWORK_API: &str = "https://homework-api.up366.cn";
 const STUDY_API: &str = "https://study-api.up366.cn";
 const SETUP_API: &str = "https://setup-api.up366.cn";
 const USER_API: &str = "https://user-api.up366.cn";
@@ -212,6 +213,24 @@ pub const ENDPOINTS: &[Endpoint] = &[
         "onlinetesting_submit",
         XOT_API,
         "/client/onlinetesting/submit",
+        true,
+        BodyKind::Form,
+    ),
+    // The report view reads the test parameters from here, and the answer page
+    // reloads the same document after a retest reset.
+    ep(
+        "onlinemarking_alldata",
+        XOT_API,
+        "/client/onlinemarking/alldata",
+        false,
+        BodyKind::Form,
+    ),
+    // "重新测试": resets a submitted attempt so the ordinary submit is recorded
+    // again. Called by the official homework page before re-answering.
+    ep(
+        "homework_test_redo",
+        HOMEWORK_API,
+        "/client/homework/test/redo",
         true,
         BodyKind::Form,
     ),
@@ -378,6 +397,7 @@ mod tests {
             vec![
                 "login",
                 "onlinetesting_submit",
+                "homework_test_redo",
                 "word_pk_submit",
                 "task_score_submit",
                 "task_score_gzip_submit",
