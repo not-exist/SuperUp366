@@ -9,13 +9,12 @@ import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/LoadingState";
 import { ArrowLeftIcon, UploadIcon } from "../components/Icons";
 import { useAccount } from "../hooks/account";
-import { countWords, errorMessage, writingCharacterCount } from "../utils";
-
-/** Seconds spent on the paper, at least one and at most one day. */
-function studySeconds(startedAt: number | null): number {
-  if (startedAt === null) return 1;
-  return Math.min(86_400, Math.max(1, Math.floor((Date.now() - startedAt) / 1000)));
-}
+import {
+  countWords,
+  errorMessage,
+  studySeconds,
+  writingCharacterCount,
+} from "../utils";
 
 export function AppliedWriting() {
   const { jobId } = useParams();
@@ -49,6 +48,10 @@ export function AppliedWriting() {
 
   const questions = task.data?.questions ?? [];
   const submitted = task.data?.submitted ?? false;
+  const retestSupported = task.data?.retest_supported ?? false;
+  // A submitted paper with no redo support is read-only; one that supports
+  // retest stays editable because the submission resets the old answers first.
+  const locked = submitted && !retestSupported;
   const answers = questions.map((question) => ({
     question_id: question.question_id,
     text: texts[question.question_id] ?? "",
@@ -117,10 +120,33 @@ export function AppliedWriting() {
         </div>
       )}
 
-      {submitted && (
-        <div className="banner banner--success" role="status">
+      {submitted && !retestSupported && (
+        <div
+          className="banner banner--success"
+          role="status"
+          data-testid="writing-submitted"
+        >
           <strong>已提交</strong>
-          <span>该作业已经提交，不能再次提交。</span>
+          <span>
+            该作业已经提交，不能再次提交。
+            {task.data?.retest_reason ? ` ${task.data.retest_reason}` : ""}
+          </span>
+        </div>
+      )}
+
+      {submitted && retestSupported && (
+        <div
+          className="banner banner--info"
+          role="note"
+          data-testid="writing-retest-notice"
+        >
+          <div>
+            <strong>支持重做</strong>
+            <span>
+              该作业支持重做，提交时会先重置上一次作答。
+              {task.data?.retest_reason ? ` ${task.data.retest_reason}` : ""}
+            </span>
+          </div>
         </div>
       )}
 
@@ -130,7 +156,13 @@ export function AppliedWriting() {
           role="status"
           data-testid="writing-result"
         >
-          <strong>{confirmed.verified ? "提交成功" : "已发送，等待服务端刷新"}</strong>
+          <strong>
+            {confirmed.retested
+              ? "已重做并重新提交"
+              : confirmed.verified
+                ? "提交成功"
+                : "已发送，等待服务端刷新"}
+          </strong>
           <span>
             {confirmed.message}
             {confirmed.score != null ? ` · 当前分数 ${confirmed.score}` : ""}
@@ -160,11 +192,15 @@ export function AppliedWriting() {
               data-testid="writing-preview"
               onClick={() => previewMutation.mutate()}
               disabled={
-                !allFilled || submitted || previewMutation.isPending || confirmed !== null
+                !allFilled || locked || previewMutation.isPending || confirmed !== null
               }
             >
               <UploadIcon />
-              {previewMutation.isPending ? "准备中…" : "预览并提交"}
+              {previewMutation.isPending
+                ? "准备中…"
+                : submitted && retestSupported
+                  ? "预览并重新提交"
+                  : "预览并提交"}
             </button>
           </div>
 
@@ -183,7 +219,9 @@ export function AppliedWriting() {
             <div>
               <strong>计分说明</strong>
               <span>
-                本机不生成作文分数；答案提交后由服务端批改。同一作业只能提交一次。
+                {submitted && retestSupported
+                  ? "本机不生成作文分数；答案提交后由服务端批改。本次提交会先重置上一次作答。"
+                  : "本机不生成作文分数；答案提交后由服务端批改。同一作业只能提交一次。"}
               </span>
             </div>
           </div>
@@ -213,7 +251,7 @@ export function AppliedWriting() {
                     maxLength={3000}
                     value={texts[question.question_id] ?? ""}
                     placeholder="在此输入英文作文"
-                    disabled={submitted || confirmed !== null}
+                    disabled={locked || confirmed !== null}
                     onChange={(event) => {
                       const value = event.currentTarget.value;
                       setTexts((previous) => ({
@@ -243,8 +281,16 @@ export function AppliedWriting() {
             <>
               <p>
                 {preview.title} · 共 {preview.answers.length} 题 · 满分{" "}
-                {preview.total_score}。提交后不能重复提交，作文由服务端批改。
+                {preview.total_score}。
+                {preview.retest
+                  ? "本次提交会先重置上一次作答，再写入新作文。"
+                  : "提交后不能重复提交，作文由服务端批改。"}
               </p>
+              {preview.retest && (
+                <p data-testid="writing-retest-confirm">
+                  本次将先重置原作答，再提交新作文。
+                </p>
+              )}
               <ul className="summary-list">
                 {preview.answers.map((answer) => (
                   <li key={answer.question_id}>

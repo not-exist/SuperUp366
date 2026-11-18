@@ -31,6 +31,16 @@ export function percent(current: number, total: number): number {
   return Math.min(100, Math.max(0, Math.round((current / total) * 100)));
 }
 
+/**
+ * Seconds spent on a paper: at least one, at most one day.
+ *
+ * Shared by the writing and dictation pages, which send `duration_sec`.
+ */
+export function studySeconds(startedAt: number | null): number {
+  if (startedAt === null) return 1;
+  return Math.min(86_400, Math.max(1, Math.floor((Date.now() - startedAt) / 1000)));
+}
+
 export function writingCharacterCount(text: string): number {
   return text.replace(/\n+/g, "").length;
 }

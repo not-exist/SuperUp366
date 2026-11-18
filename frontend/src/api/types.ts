@@ -178,6 +178,8 @@ export interface AnswerDocument {
   questions: AnswerQuestion[];
   /** The paper is a pure applied-writing paper; the writing page can submit it. */
   applied_writing: boolean;
+  /** The paper is a pure dictation paper (question_type 19/20 only). */
+  dictation: boolean;
 }
 
 /** One question type group from the error-notebook overview. */
@@ -351,6 +353,10 @@ export interface AppliedWritingTask {
   submitted: boolean;
   /** Expired jobs are not blocked here; the UI only warns. */
   expired: boolean;
+  /** Whether the server allows redoing and resubmitting a submitted paper. */
+  retest_supported: boolean;
+  /** Why redoing is or is not allowed; empty when `submitted` is false. */
+  retest_reason: string;
   total_score: number;
   questions: AppliedWritingQuestion[];
 }
@@ -371,6 +377,8 @@ export interface AppliedWritingPreview {
   job_id: string;
   title: string;
   total_score: number;
+  /** `true` means the submission resets the previous answers first. */
+  retest: boolean;
   answers: AppliedWritingPreviewAnswer[];
   /** The exact `answerData` XML a submission would carry. */
   answer_data: string;
@@ -381,6 +389,72 @@ export interface AppliedWritingPreview {
 export interface AppliedWritingSubmit {
   ok: boolean;
   verified: boolean;
+  score: number | null;
+  /** `true` when this submission was a redo of an earlier one. */
+  retested: boolean;
+  message: string;
+}
+
+/** One dictation question detected in a dictation paper. */
+export interface DictationQuestion {
+  question_id: string;
+  /** `<question_no>` as the paper spells it. */
+  number: string;
+  score: number;
+  /** Reference duration in seconds. */
+  duration: number;
+  /** Prompt text: the passage hint for a passage dictation, the sentence otherwise. */
+  prompt: string;
+}
+
+/** A dictation (默写) task, confirmed from the paper detail. */
+export interface DictationTask {
+  job_id: string;
+  title: string;
+  submitted: boolean;
+  /** Expired jobs are not blocked here; the UI only warns. */
+  expired: boolean;
+  /** Whether the server allows redoing and resubmitting a submitted paper. */
+  retest_supported: boolean;
+  /** Why redoing is or is not allowed; empty when `submitted` is false. */
+  retest_reason: string;
+  total_score: number;
+  /** Only question_type 19/20 questions; mixed papers list the rest in `other_questions`. */
+  questions: DictationQuestion[];
+  /** Number of non-dictation questions the paper also contains. */
+  other_questions: number;
+}
+
+/** One answer supplied by the user. */
+export interface DictationAnswerInput {
+  question_id: string;
+  text: string;
+}
+
+export interface DictationPreviewAnswer {
+  question_id: string;
+  number: string;
+  text: string;
+}
+
+export interface DictationPreview {
+  job_id: string;
+  title: string;
+  total_score: number;
+  /** `true` means the submission resets the previous answers first. */
+  retest: boolean;
+  answers: DictationPreviewAnswer[];
+  /** The exact `answerData` XML a submission would carry. */
+  answer_data: string;
+  /** Single-use token for `dictation_submit`. */
+  confirm_token: string;
+}
+
+export interface DictationSubmit {
+  ok: boolean;
+  verified: boolean;
+  /** `true` when this submission was a redo of an earlier one. */
+  retested: boolean;
   score: number | null;
   message: string;
 }
@@ -521,6 +595,24 @@ export interface CommandMap {
   applied_writing_submit: {
     args: { confirm_token: string };
     result: AppliedWritingSubmit;
+  };
+
+  dictation_get: {
+    args: { account_id: string; job_id: string };
+    result: DictationTask;
+  };
+  dictation_preview: {
+    args: {
+      account_id: string;
+      job_id: string;
+      answers: DictationAnswerInput[];
+      duration_sec: number;
+    };
+    result: DictationPreview;
+  };
+  dictation_submit: {
+    args: { confirm_token: string };
+    result: DictationSubmit;
   };
 
   correction_overview: {

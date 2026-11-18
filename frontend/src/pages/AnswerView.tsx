@@ -79,6 +79,26 @@ export function AnswerView() {
         <ErrorState error={answer.error} onRetry={() => answer.refetch()} />
       )}
 
+      {answer.isSuccess && answer.data.dictation && jobId && (
+        <div
+          className="banner banner--info"
+          role="note"
+          data-testid="answer-dictation-link"
+        >
+          <div>
+            <strong>默写作业</strong>
+            <span>试卷已确认为纯默写卷，可填写后提交。</span>
+          </div>
+          <Link
+            className="button button--primary"
+            to={`/jobs/${jobId}/dictation`}
+            style={{ marginLeft: "auto" }}
+          >
+            去提交默写
+          </Link>
+        </div>
+      )}
+
       {answer.isSuccess && answer.data.applied_writing && jobId && (
         <div
           className="banner banner--info"

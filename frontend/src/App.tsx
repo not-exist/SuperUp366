@@ -7,6 +7,7 @@ import { AppliedWriting } from "./pages/AppliedWriting";
 import { BookDetail } from "./pages/BookDetail";
 import { BookTask } from "./pages/BookTask";
 import { Books } from "./pages/Books";
+import { Dictation } from "./pages/Dictation";
 import { Jobs } from "./pages/Jobs";
 import { Login } from "./pages/Login";
 import { ReadAloud } from "./pages/ReadAloud";
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="jobs" element={<Jobs />} />
           <Route path="jobs/:jobId/answer" element={<AnswerView />} />
           <Route path="jobs/:jobId/writing" element={<AppliedWriting />} />
+          <Route path="jobs/:jobId/dictation" element={<Dictation />} />
           <Route path="jobs/:jobId/wordpk" element={<WordPk />} />
           <Route path="jobs/:jobId/readaloud" element={<ReadAloud />} />
           <Route path="books" element={<Books />} />

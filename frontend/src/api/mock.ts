@@ -23,6 +23,10 @@ import type {
   CorrectionStatus,
   CorrectionSubmit,
   Course,
+  DictationPreview,
+  DictationQuestion,
+  DictationSubmit,
+  DictationTask,
   JobRow,
   JobStatus,
   JobStatusKind,
@@ -360,6 +364,7 @@ function buildAnswer(jobId: string, title: string): AnswerDocument {
     paper_xml: `<paper id="${jobId}"><section type="reading"><question number="1" type="1"/></section></paper>`,
     questions,
     applied_writing: false,
+    dictation: false,
   };
 }
 
@@ -556,11 +561,14 @@ let writingPreviewCount = 0;
 
 function appliedWritingTask(jobId: string): AppliedWritingTask {
   const job = jobs.find((row) => row.job_id === jobId);
+  const submitted = submittedWritingJobs.has(jobId);
   return {
     job_id: jobId,
     title: job?.name ?? "应用文写作",
-    submitted: submittedWritingJobs.has(jobId),
+    submitted,
     expired: false,
+    retest_supported: false,
+    retest_reason: submitted ? "该作业已批改，服务端不允许重做。" : "",
     total_score: 15,
     questions: [
       {
@@ -597,6 +605,97 @@ function mockWritingPreview(
     job_id: jobId,
     title: task.title,
     total_score: task.total_score,
+    retest: task.submitted && task.retest_supported,
+    answers: task.questions.map((question) => {
+      const answer = answers.find((entry) => entry.question_id === question.question_id);
+      return {
+        question_id: question.question_id,
+        number: question.number,
+        text: answer?.text.trim() ?? "",
+      };
+    }),
+    answer_data: `<elements>${elements.join("")}</elements>`,
+    confirm_token: token,
+  };
+}
+
+// --- dictation --------------------------------------------------------
+
+const submittedDictationJobs = new Set<string>();
+const pendingDictationJobs = new Map<
+  string,
+  { jobId: string; retest: boolean }
+>();
+/** Seeded submitted jobs whose dictation the server allows to redo. */
+const retestableDictationJobs = new Set<string>(["job-1-2"]);
+let dictationPreviewCount = 0;
+
+function dictationQuestions(jobId: string): DictationQuestion[] {
+  return [
+    {
+      question_id: `${jobId}-d1`,
+      number: "1",
+      score: 10,
+      duration: 300,
+      prompt:
+        "篇章默写：默写 Unit 2 课文第二段，注意段落与标点。\n提示：The teacher asked us to read the passage aloud before class.",
+    },
+    {
+      question_id: `${jobId}-d2`,
+      number: "2",
+      score: 5,
+      duration: 90,
+      prompt:
+        "句子默写：The more you practice, the more confident you will become.",
+    },
+  ];
+}
+
+function dictationTask(jobId: string): DictationTask {
+  const job = jobs.find((row) => row.job_id === jobId);
+  const retestSupported = retestableDictationJobs.has(jobId);
+  const submitted = submittedDictationJobs.has(jobId) || retestSupported;
+  const questions = dictationQuestions(jobId);
+  return {
+    job_id: jobId,
+    title: job?.name ?? "默写作业",
+    submitted,
+    expired: false,
+    retest_supported: retestSupported,
+    retest_reason: submitted
+      ? retestSupported
+        ? "服务端允许重做，提交时会先重置上一次作答。"
+        : "该作业已批改，服务端不允许重做。"
+      : "",
+    total_score: questions.reduce((sum, question) => sum + question.score, 0),
+    questions,
+    other_questions: 0,
+  };
+}
+
+function mockDictationPreview(
+  jobId: string,
+  answers: { question_id: string; text: string }[],
+): DictationPreview {
+  const task = dictationTask(jobId);
+  const retest = task.submitted && task.retest_supported;
+  const token = `mock-dictation-token-${++dictationPreviewCount}`;
+  if (answers.length !== task.questions.length) {
+    throw { code: "invalid_input", message: "请先填写全部默写题", retryable: false };
+  }
+  const elements = task.questions.map((question) => {
+    const answer = answers.find((entry) => entry.question_id === question.question_id);
+    if (!answer || !answer.text.trim()) {
+      throw { code: "invalid_input", message: "默写内容不能为空", retryable: false };
+    }
+    return `<element id="${question.question_id}"><answers><![CDATA[${answer.text.trim()}]]></answers></element>`;
+  });
+  pendingDictationJobs.set(token, { jobId, retest });
+  return {
+    job_id: jobId,
+    title: task.title,
+    total_score: task.total_score,
+    retest,
     answers: task.questions.map((question) => {
       const answer = answers.find((entry) => entry.question_id === question.question_id);
       return {
@@ -768,6 +867,9 @@ export async function handleMock(
       const job = jobs.find((row) => row.job_id === job_id);
       const answer = buildAnswer(job_id, job?.name ?? "作业答案");
       answer.applied_writing = job?.kind === "applied_writing";
+      // A dictation-titled job is a pure 19/20 paper in the mock, so the
+      // answer page offers the dictation entry.
+      answer.dictation = job?.kind === "dictation";
       return answer;
     }
 
@@ -882,9 +984,50 @@ export async function handleMock(
       return {
         ok: true,
         verified: true,
+        retested: false,
         score: 12,
         message: "提交成功（预览环境，未发送到服务器）。",
       } satisfies AppliedWritingSubmit;
+    }
+
+    case "dictation_get": {
+      const { job_id } = args as CommandMap["dictation_get"]["args"];
+      await latency();
+      return dictationTask(job_id);
+    }
+
+    case "dictation_preview": {
+      const { job_id, answers } =
+        args as CommandMap["dictation_preview"]["args"];
+      await delay(420);
+      return mockDictationPreview(job_id, answers);
+    }
+
+    case "dictation_submit": {
+      const { confirm_token } = args as CommandMap["dictation_submit"]["args"];
+      await delay(700);
+      const pending = pendingDictationJobs.get(confirm_token);
+      if (pending === undefined) {
+        throw {
+          code: "confirmation_expired",
+          message: "确认已过期或已使用，请重新预览",
+          retryable: false,
+        };
+      }
+      pendingDictationJobs.delete(confirm_token);
+      submittedDictationJobs.add(pending.jobId);
+      const submitted = jobs.find((row) => row.job_id === pending.jobId);
+      if (submitted) {
+        submitted.status = { kind: "finished", score: 18 };
+        submitted.score = 18;
+      }
+      return {
+        ok: true,
+        verified: true,
+        retested: pending.retest,
+        score: 18,
+        message: "提交成功（预览环境，未发送到服务器）。",
+      } satisfies DictationSubmit;
     }
 
     case "correction_overview": {
@@ -1067,6 +1210,9 @@ export function resetMock(options?: MockBootstrap): void {
   submittedWritingJobs.clear();
   pendingWritingJobs.clear();
   writingPreviewCount = 0;
+  submittedDictationJobs.clear();
+  pendingDictationJobs.clear();
+  dictationPreviewCount = 0;
   clearFailures();
   applyBootstrap(options);
 }
