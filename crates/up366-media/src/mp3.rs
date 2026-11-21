@@ -20,6 +20,10 @@ pub struct AudioFileInfo {
     pub size: u64,
     /// Lowercase hex SHA-256 of the whole file.
     pub sha256: String,
+    /// Header-parsed MPEG duration estimate, when the file contains at least
+    /// one parseable frame header. Decoder validation and encoder delay/padding
+    /// are not included.
+    pub duration_ms: Option<u64>,
 }
 
 /// Whether the first bytes of a file look like an MP3.
@@ -33,7 +37,8 @@ pub fn is_mp3_header(bytes: &[u8]) -> bool {
     bytes.len() >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0
 }
 
-/// Validate `path` as an MP3 and return its size and SHA-256.
+/// Validate `path` as an MP3 and return its size, SHA-256 and a header-parsed
+/// duration estimate.
 ///
 /// Returns [`MediaError::NotMp3`] when the header does not match.
 pub fn inspect_mp3(path: impl AsRef<Path>) -> Result<AudioFileInfo> {
@@ -46,10 +51,14 @@ pub fn inspect_mp3(path: impl AsRef<Path>) -> Result<AudioFileInfo> {
         return Err(MediaError::NotMp3(path.to_owned()));
     }
 
-    // Hash the whole file, including the header bytes just consumed.
+    // Hash the whole file, including the header bytes just consumed. Keeping
+    // the bytes also lets us derive a header-parsed duration estimate without
+    // trusting optional ID3/Xing metadata, which is often absent from files
+    // exported by phones and video tools.
     file.seek(SeekFrom::Start(0))?;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
+    let mut bytes = Vec::new();
     let mut size = 0u64;
     loop {
         let read = file.read(&mut buf)?;
@@ -57,6 +66,7 @@ pub fn inspect_mp3(path: impl AsRef<Path>) -> Result<AudioFileInfo> {
             break;
         }
         hasher.update(&buf[..read]);
+        bytes.extend_from_slice(&buf[..read]);
         size += read as u64;
     }
     let mut sha256 = String::with_capacity(64);
@@ -69,6 +79,105 @@ pub fn inspect_mp3(path: impl AsRef<Path>) -> Result<AudioFileInfo> {
         path: path.to_owned(),
         size,
         sha256,
+        duration_ms: mp3_duration_ms(&bytes),
+    })
+}
+
+/// Estimate an MPEG Layer III duration from parseable frame headers.
+///
+/// This intentionally does not depend on a decoder. It accepts MPEG-1,
+/// MPEG-2 and MPEG-2.5 Layer III headers, including variable bitrate files, and
+/// sums each frame's sample count at its own sample rate. Frame payloads are
+/// not decoded, and encoder delay/padding are not accounted for. Invalid
+/// trailing bytes are ignored after the last complete frame.
+fn mp3_duration_ms(bytes: &[u8]) -> Option<u64> {
+    let mut cursor = id3_end(bytes)?;
+    let mut frames = 0u64;
+    let mut duration_nanos = 0u128;
+
+    while cursor + 4 <= bytes.len() {
+        let Some(frame) = frame_at(bytes, cursor) else {
+            cursor += 1;
+            continue;
+        };
+        if cursor + frame.length > bytes.len() {
+            break;
+        }
+        frames += 1;
+        duration_nanos +=
+            u128::from(frame.samples_per_frame) * 1_000_000_000 / u128::from(frame.sample_rate);
+        cursor += frame.length;
+    }
+
+    (frames > 0).then_some((duration_nanos / 1_000_000) as u64)
+}
+
+fn id3_end(bytes: &[u8]) -> Option<usize> {
+    if bytes.len() < 10 || &bytes[..3] != b"ID3" {
+        return Some(0);
+    }
+    if bytes[6..10].iter().any(|byte| byte & 0x80 != 0) {
+        return None;
+    }
+    let size = bytes[6..10]
+        .iter()
+        .fold(0usize, |value, byte| (value << 7) | usize::from(*byte));
+    let footer = usize::from(bytes[5] & 0x10 != 0) * 10;
+    10usize.checked_add(size)?.checked_add(footer)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MpegFrame {
+    length: usize,
+    sample_rate: u32,
+    samples_per_frame: u16,
+}
+
+fn frame_at(bytes: &[u8], offset: usize) -> Option<MpegFrame> {
+    let header = u32::from_be_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?);
+    if bytes[offset] != 0xFF || (bytes[offset + 1] & 0xE0) != 0xE0 {
+        return None;
+    }
+
+    let version = (header >> 19) & 0x3;
+    let layer = (header >> 17) & 0x3;
+    let bitrate_index = ((header >> 12) & 0xF) as usize;
+    let sample_rate_index = ((header >> 10) & 0x3) as usize;
+    let padding = ((header >> 9) & 1) as usize;
+    if version == 1
+        || layer != 1
+        || bitrate_index == 0
+        || bitrate_index == 15
+        || sample_rate_index == 3
+    {
+        return None;
+    }
+
+    let bitrate_kbps = match version {
+        3 => [
+            0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
+        ][bitrate_index],
+        2 | 0 => [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160][bitrate_index],
+        _ => return None,
+    } as usize;
+    let base_rate = [44_100u32, 48_000, 32_000][sample_rate_index];
+    let sample_rate = base_rate
+        / match version {
+            3 => 1,
+            2 => 2,
+            0 => 4,
+            _ => return None,
+        };
+    let samples_per_frame = if version == 3 { 1_152 } else { 576 };
+    let length = if version == 3 {
+        144 * bitrate_kbps * 1_000 / sample_rate as usize + padding
+    } else {
+        72 * bitrate_kbps * 1_000 / sample_rate as usize + padding
+    };
+    (length >= 4).then_some(MpegFrame {
+        length,
+        sample_rate,
+        samples_per_frame,
     })
 }
 
@@ -116,6 +225,7 @@ mod tests {
             info.sha256,
             "8fe0f72ff01d77c3069dcc3c64c4de672d51a999ce92e1be75bca3692fc1ff5e"
         );
+        assert_eq!(info.duration_ms, None);
     }
 
     #[test]
@@ -124,6 +234,22 @@ mod tests {
         let info = inspect_mp3(file.path()).unwrap();
         assert_eq!(info.size, 6);
         assert_eq!(info.sha256.len(), 64);
+        assert_eq!(info.duration_ms, None);
+    }
+
+    #[test]
+    fn duration_counts_mpeg_frames() {
+        let frame = [0xFF, 0xFB, 0x90, 0x64];
+        let mut bytes = Vec::new();
+        for _ in 0..2 {
+            bytes.extend_from_slice(&frame);
+            bytes.resize(bytes.len() + 417 - frame.len(), 0);
+        }
+        let file = write_temp(&bytes);
+
+        let info = inspect_mp3(file.path()).unwrap();
+
+        assert_eq!(info.duration_ms, Some(52));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Read-aloud score payload.
 //!
-//! Shape confirmed against two live submissions (see
+//! The scheduled-job builder is confirmed against two live submissions (see
 //! `docs/protocol/confirmed.md`):
 //!
 //! - one `<answer>` per question in `result.testInfo.answerdata`, carrying the
@@ -12,11 +12,16 @@
 //!   one `elementType = 2` row per sentence (`{questionId}-{n}`);
 //! - `studyTaskId` must equal the job id, and the request is
 //!   `POST /client/task/score/submit/v2` with `submitType = 8`.
+//!
+//! Course-book pages can use the separate legacy flipbook builder below:
+//! `srcType = 1`, empty XML `result`, and stringified `elementAttr` rows in
+//! `qstJson`. The official reader obtains these from local `TaskStuded`
+//! persistence; this builder emits the flattened upload rows directly.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::paper::ReadAloudPaper;
+use super::paper::{PaperQuestion, ReadAloudPaper};
 use crate::client::Client;
 use crate::endpoint::get;
 use crate::error::{ProtocolError, Result};
@@ -35,6 +40,109 @@ pub struct ReadAloudRecording {
     pub question_id: String,
     /// OSS URL returned by [`super::upload_object`]'s caller.
     pub record_url: String,
+    /// Duration of the uploaded recording. Older stored assets may not have
+    /// this metadata, in which case the paper's reference duration is used.
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+}
+
+struct ScoredRecording {
+    result: i64,
+    duration_seconds: u32,
+    element_attr: Value,
+}
+
+fn score_recording(
+    question: &PaperQuestion,
+    recording: &ReadAloudRecording,
+    score: f64,
+    study_date_ms: i64,
+) -> Result<ScoredRecording> {
+    if !(0.0..=question.score).contains(&score) {
+        return Err(ProtocolError::Invalid(format!(
+            "score {score} is outside 0..={} for question {}",
+            question.score, question.question_id
+        )));
+    }
+    let result = if score >= question.score {
+        1
+    } else if score == 0.0 {
+        2
+    } else {
+        3
+    };
+    let duration_seconds = recording
+        .duration_ms
+        .map(|duration| duration.div_ceil(1000).min(u64::from(u32::MAX)) as u32)
+        .unwrap_or(question.duration);
+    let element_attr = json!({
+        "question_id": question.question_id,
+        "question_type": question.question_type,
+        "order": 1,
+        "user_score": score,
+        "user_answer": "",
+        "answer": "",
+        "score": question.score,
+        "result": result,
+        "timestamp": study_date_ms,
+        "record_url": recording.record_url,
+        "duration": duration_seconds,
+        "wrongnote_flag": 1,
+        "recForm": 1,
+        "comment": "",
+        "comment_ai": "",
+        "pic_url": "",
+        "ocrTids": "",
+        "record_result": "",
+        "accuracy": 0,
+        "completion": 0,
+        "fluency": 0,
+        "code": 0,
+    });
+
+    Ok(ScoredRecording {
+        result,
+        duration_seconds,
+        element_attr,
+    })
+}
+
+struct QstElement {
+    element_id: String,
+    element_type: i64,
+    order: usize,
+    element_attr: Value,
+}
+
+fn qst_elements(question_id: &str, sentence_count: usize, attr: &Value) -> Vec<QstElement> {
+    let mut elements = Vec::with_capacity(sentence_count + 1);
+    elements.push(QstElement {
+        element_id: question_id.to_owned(),
+        element_type: 1,
+        order: 1,
+        element_attr: attr.clone(),
+    });
+    for order in 1..=sentence_count {
+        let element_id = format!("{question_id}-{order}");
+        let mut element_attr = attr.clone();
+        element_attr["question_id"] = json!(&element_id);
+        element_attr["order"] = json!(order);
+        elements.push(QstElement {
+            element_id,
+            element_type: 2,
+            order,
+            element_attr,
+        });
+    }
+    elements
+}
+
+fn score_percent(total: f64, maximum: f64) -> f64 {
+    if maximum > 0.0 {
+        (total / maximum * 100.0 * 100.0).round() / 100.0
+    } else {
+        0.0
+    }
 }
 
 /// Ids every read-aloud submission needs.
@@ -46,8 +154,8 @@ pub struct ReadAloudContext {
     pub book_id: String,
     /// `taskId` = `chapterId` = `contentId`.
     pub content_id: String,
-    /// The scheduled job id. `None` for a course-book page: the reader then
-    /// sends an empty `studyTaskId`, `submitType = 0` and no `qstJson`.
+    /// The scheduled job id. `None` for a course-book page; the caller then
+    /// selects the reader-specific row shape and keeps `studyTaskId` empty.
     pub job_id: Option<String>,
     pub paper_id: String,
 }
@@ -82,7 +190,13 @@ pub fn build_row(
 
     let mut answer_elements = Vec::with_capacity(paper.questions.len());
     let mut mark_elements = Vec::with_capacity(paper.questions.len());
-    let mut qst_json = Vec::new();
+    let mut qst_json = Vec::with_capacity(
+        paper
+            .questions
+            .iter()
+            .map(|question| question.sentences.len() + 1)
+            .sum(),
+    );
     let mut total = 0.0;
 
     for (index, question) in paper.questions.iter().enumerate() {
@@ -102,18 +216,14 @@ pub fn build_row(
                     question.question_id
                 ))
             })?;
-        let result = if score >= question.score {
-            1
-        } else if score == 0.0 {
-            2
-        } else {
-            3
-        };
+        let scored = score_recording(question, recording, score, study_date_ms)?;
+        let result = scored.result;
         total += score;
 
         let text = question.sentences.join(" ");
         let question_id = question.question_id.as_str();
         let record_url = recording.record_url.as_str();
+        let duration = scored.duration_seconds;
         answer_elements.push(format!(
             "<element id=\"{id}\"><answers>\
              <answer_url>{url}</answer_url>\
@@ -127,7 +237,7 @@ pub fn build_row(
             url = record_url,
             score = score_text(score),
             text = cdata(&text),
-            duration = question.duration,
+            duration = duration,
         ));
         mark_elements.push(format!(
             "<element id=\"{id}\"><mark_data><score>{score}</score>\
@@ -136,44 +246,11 @@ pub fn build_row(
             score = score_text(score),
         ));
 
-        let attr = json!({
-            "question_id": question_id,
-            "question_type": question.question_type,
-            "order": 1,
-            "user_score": score,
-            "user_answer": "",
-            "answer": "",
-            "score": question.score,
-            "result": result,
-            "timestamp": study_date_ms,
-            "record_url": record_url,
-            "duration": question.duration,
-            "wrongnote_flag": 1,
-            "recForm": 1,
-            "comment": "",
-            "comment_ai": "",
-            "pic_url": "",
-            "ocrTids": "",
-            "record_result": "",
-            "accuracy": 0,
-            "completion": 0,
-            "fluency": 0,
-            "code": 0,
-        });
-        qst_json.push(json!({
-            "elementId": question_id,
-            "elementType": 1,
-            "elementAttr": attr,
-        }));
-        for number in 1..=question.sentences.len() {
-            let element_id = format!("{question_id}-{number}");
-            let mut sentence_attr = attr.clone();
-            sentence_attr["question_id"] = json!(&element_id);
-            sentence_attr["order"] = json!(number);
+        for element in qst_elements(question_id, question.sentences.len(), &scored.element_attr) {
             qst_json.push(json!({
-                "elementId": &element_id,
-                "elementType": 2,
-                "elementAttr": sentence_attr,
+                "elementId": element.element_id,
+                "elementType": element.element_type,
+                "elementAttr": element.element_attr,
             }));
         }
     }
@@ -191,17 +268,12 @@ pub fn build_row(
         "testInfo": { "answerdata": answerdata, "markdatao": markdatao },
     })
     .to_string();
-    let percent = if paper.total_score > 0.0 {
-        (total / paper.total_score * 100.0 * 100.0).round() / 100.0
-    } else {
-        0.0
-    };
+    let percent = score_percent(total, paper.total_score);
 
     // The two submission sources carry different rows. A scheduled job sends
     // its `studyTaskId`, the paper id, the per-question `qstJson` and the
-    // device fields (verified live); a course-book page mirrors the reader's
-    // "textbook" branch, which has no job row: empty `studyTaskId`,
-    // `submitType = 0`, no `qstJson`, and no job-only fields.
+    // device fields (verified live). A legacy packType<7 reader uses
+    // `build_legacy_reader_row`; this branch is the XML textbook bridge.
     let job_id = context.job_id.as_deref();
     let mut row = json!({
         "id": uuid::Uuid::new_v4().simple().to_string(),
@@ -240,6 +312,81 @@ pub fn build_row(
         row["qstJson"] = json!("");
     }
     Ok(row)
+}
+
+/// Build the legacy flipbook reader's `TaskStuded` row without sending it.
+///
+/// The extracted `packType < 7` reader first persists per-question
+/// `elementAttr` rows through `submitEleAttr`. This builder emits the
+/// flattened `qstJson` upload rows directly; it does not persist the reader's
+/// local `TaskStuded` record.
+pub fn build_legacy_reader_row(
+    context: &ReadAloudContext,
+    questions: &[PaperQuestion],
+    recordings: &[ReadAloudRecording],
+    scores: &[f64],
+    study_date_ms: i64,
+    seconds: i64,
+) -> Result<Value> {
+    if questions.len() != recordings.len() || questions.len() != scores.len() {
+        return Err(ProtocolError::Invalid(
+            "legacy reader row inputs have mismatched lengths".to_owned(),
+        ));
+    }
+
+    let mut qst_json = Vec::with_capacity(
+        questions
+            .iter()
+            .map(|question| question.sentences.len() + 1)
+            .sum(),
+    );
+    let mut total: f64 = 0.0;
+    let max_score: f64 = questions.iter().map(|question| question.score).sum();
+    for ((question, recording), score) in questions.iter().zip(recordings).zip(scores) {
+        let scored = score_recording(question, recording, *score, study_date_ms)?;
+        total += score;
+        for element in qst_elements(
+            &question.question_id,
+            question.sentences.len(),
+            &scored.element_attr,
+        ) {
+            let element_attr = serde_json::to_string(&element.element_attr)
+                .map_err(|error| ProtocolError::Decode(format!("legacy qstJson: {error}")))?;
+            qst_json.push(json!({
+                "pageId": context.content_id,
+                "elementId": element.element_id,
+                "elementType": element.element_type,
+                "addTime": study_date_ms,
+                "order": element.order,
+                "elementAttr": element_attr,
+            }));
+        }
+    }
+
+    Ok(json!({
+        "id": uuid::Uuid::new_v4().simple().to_string(),
+        "uid": context.uid,
+        "bookId": context.book_id,
+        "taskId": context.content_id,
+        "chapterId": context.content_id,
+        "taskNo": 1,
+        "score": total,
+        "percent": score_percent(total, max_score),
+        "studyDate": study_date_ms,
+        "seconds": seconds,
+        "result": "",
+        "srcType": 1,
+        "batchTag": uuid::Uuid::new_v4().simple().to_string(),
+        "uploaded": 0,
+        "msg": "",
+        "failed": 0,
+        "studyTaskId": context.job_id.clone().unwrap_or_default(),
+        "courseId": context.course_id,
+        "extendParams": "",
+        "qstJson": qst_json,
+        "killStudyTask": 0,
+        "submitType": 0,
+    }))
 }
 
 /// Send one constructed row.
@@ -325,10 +472,12 @@ mod tests {
             ReadAloudRecording {
                 question_id: "Q1".to_owned(),
                 record_url: "https://oss/q1.mp3".to_owned(),
+                duration_ms: None,
             },
             ReadAloudRecording {
                 question_id: "Q2".to_owned(),
                 record_url: "https://oss/q2.mp3".to_owned(),
+                duration_ms: None,
             },
         ]
     }
@@ -399,6 +548,50 @@ mod tests {
         assert!(row.get("wrongnoteFlag").is_none());
     }
 
+    #[test]
+    fn uploaded_duration_overrides_zero_paper_duration() {
+        let mut paper = paper();
+        paper.questions[0].duration = 0;
+        let mut recording = recordings();
+        recording[0].duration_ms = Some(152_111);
+
+        let row = build_row(
+            &paper,
+            &context(),
+            &recording,
+            &[8.0, 8.0],
+            1_793_714_405_924,
+            303,
+        )
+        .unwrap();
+
+        let result: Value = serde_json::from_str(row["result"].as_str().unwrap()).unwrap();
+        let answer = result["testInfo"]["answerdata"].as_str().unwrap();
+        assert!(answer.contains("<answer_recordsec><![CDATA[153]]></answer_recordsec>"));
+        assert_eq!(row["qstJson"][0]["elementAttr"]["duration"], 153);
+    }
+
+    #[test]
+    fn legacy_reader_row_uses_src_type_one_and_qst_json() {
+        let row = build_legacy_reader_row(
+            &context(),
+            &paper().questions,
+            &recordings(),
+            &[8.0, 8.0],
+            1_793_714_405_924,
+            303,
+        )
+        .unwrap();
+
+        assert_eq!(row["srcType"], 1);
+        assert_eq!(row["result"], "");
+        assert_eq!(row["studyTaskId"], "JOB");
+        assert_eq!(row["submitType"], 0);
+        assert_eq!(row["qstJson"].as_array().unwrap().len(), 5);
+        assert_eq!(row["qstJson"][0]["elementType"], 1);
+        assert_eq!(row["qstJson"][1]["elementType"], 2);
+        assert!(row["qstJson"][0]["elementAttr"].is_string());
+    }
     #[test]
     fn a_missing_recording_or_out_of_range_score_is_rejected() {
         assert!(build_row(&paper(), &context(), &recordings()[..1], &[8.0, 8.0], 1, 1,).is_err());

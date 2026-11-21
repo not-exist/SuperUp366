@@ -483,6 +483,7 @@ export interface CommandMap {
     args: {
       account_id: string;
       book_id: string;
+      course_id: string;
       task_id: string;
       recording: { question_id: string; path: string; file_name: string };
     };
