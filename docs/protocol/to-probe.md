@@ -90,15 +90,43 @@ types) stays an open risk until one is recorded.
 
 ## 12. Course-book page submission (live)
 
-Read from the official reader bundle and the PC main process: a class-book page
-submits through `/client/task/score/submit/v2` (branch A) with an empty
-`studyTaskId`, `submitType = 0`, no `qstJson`, `taskId = chapterId = page id`,
-and the answer XML in `result`. The book tree -> `paperId` ->
-`textbook/paperinfo` path is verified read-only (§ "Course-book pages" in
-`confirmed.md`), but no live submission from this client has been recorded.
+Static evidence from the official PC reader says a class-book page submits via
+`/client/task/score/submit/v2` with empty `studyTaskId`, `submitType = 0`, empty
+`qstJson`, `taskId = page id`, `chapterId = page.parentId`, and XML in `result`.
+The upload worker parses `extendParams` from JSON text before sending; an empty
+value becomes the object `{}`. These fields are required to associate the row with
+the page's chapter/task context.
 
-Resolve with one 新概念英语1 page chosen by the account owner: after the POST,
-`/client/book/finished-task/list?bookId=` must gain a row keyed by the page id
-and the book detail progress must move. If the server rejects the empty
-`studyTaskId`, the failure code is the deciding evidence — do not retry with a
-self-made id, which writes a score row nothing associates with the page.
+Live attempt on 2026-11-21 for 新概念英语1, Lesson 1 `课文听读`
+(`bookId=B8FB77D2AAAEE151EE2DA265EB9CA6D1`, `courseId=9222783`,
+`taskId=DE3C6927A54C4FF17EFB5ACCBA00E09C`, `paperId=C7C46EB92FA4832F84D38588656F7449`):
+
+- The account's book metadata reports `packType=0`, `bookType=2`; the page is
+  `pageType=0`, `type=1`, `isContent=1` and contains eight type-9 questions.
+- One textbook-bridge v2 request with `srcType=2`, `submitType=0`, empty
+  `studyTaskId` and `qstJson`, the page id in both `taskId` and `chapterId`, and
+  the constructed XML `result` returned success
+  (`data` absent). Do not retry this
+  task with the same or a guessed alternate shape.
+- Read-only checks afterward still showed no `finished-task/list` row, the task
+  node at score 0, all eight question rows at score 0 with empty `myAnswer`, and
+  `answer/detail.userAnswer` as `<elements></elements>`. This establishes that
+  the v2 attempt did not persist a visible answer; it does not establish whether
+  the endpoint silently ignored the row or accepted it in another subsystem.
+- The eight supplied MP3 files uploaded to OSS and are retained in the local
+  `audio_assets` table with course-scoped keys and measured duration. OSS has no
+  delete endpoint in the confirmed API inventory.
+
+- Static extraction distinguishes two PC branches: `submitAnswerData("textbook")`
+  uses `srcType=2` plus XML `result`, while the `packType < 7` flipbook path
+  uses `submitTaskV1`/`srcType=1`, an empty `result`, and qstJson previously
+  populated by `submitEleAttr`. A dry-run for the target produced 21 rows
+  (8 question rows plus 13 sentence rows). The first client implementation sent
+  the page id as both `taskId` and `chapterId` and sent legacy `extendParams` as
+  an empty string; both differed from the official page context/worker normalization.
+  After correcting those fields, one authorized legacy submission returned
+  `data=null` and persisted successfully: the page gained a finished-task row,
+  task score became 100, all eight question rows gained scores and `myAnswer` URLs,
+  and answer detail score became 100. This closes the course-book legacy shape
+  end to end for this target. No further write is needed; exact renderer
+  `StudyTaskId/taskNo` and ASES attributes remain static unknowns for other pages.

@@ -180,7 +180,7 @@ and the submit, taken from server time.
 | `readaloud_preview` | `account_id, job_id, scores?[]` | `ReadAloudPreview` (row + `confirm_token`) |
 | `readaloud_submit` | `confirm_token` | `ReadAloudSubmit` |
 | `book_readaloud_get` | `account_id, book_id, book_type, course_id, task_id` | `ReadAloudTask` |
-| `book_readaloud_upload` | `account_id, book_id, task_id, recording{question_id, path, file_name}` | `ReadAloudUpload` |
+| `book_readaloud_upload` | `account_id, book_id, course_id, task_id, recording{question_id, path, file_name}` | `ReadAloudUpload` |
 | `book_readaloud_preview` | `account_id, book_id, book_type, course_id, task_id, scores?[]` | `ReadAloudPreview` |
 
 `readaloud_get` reads `paperId` from the cached job (falling back to
@@ -200,9 +200,12 @@ because `book_detail` already resolved the real job id.
 The `book_readaloud_*` commands serve a class-book page that has no job. They
 read the page's `paperId` from `/client/books/tree` (the assigning `courseId` is
 required), fetch the paper from `xot-api /client/textbook/paperinfo`, and build
-the same view. Their submit row mirrors the reader's textbook branch: empty
-`studyTaskId`, `submitType = 0`, no `qstJson`, and `taskId = chapterId = page
-id`. Only `book_type = 2` is accepted; ordinary books submit through a
+the same view. Their submit row is selected by `packType`: `packType < 7` uses the
+legacy flipbook shape (`srcType = 1`, empty `result`, flattened `qstJson`), while
+other supported pack types use the textbook bridge (`srcType = 2`, XML `result`,
+empty `qstJson`). Both use an empty `studyTaskId` and `taskId = chapterId = page
+id`. The legacy shape is based on static extraction and is not yet end-to-end
+confirmed. Only `book_type = 2` is accepted; ordinary books submit through a
 different branch.
 
 `readaloud_upload` validates the mp3, uploads it to OSS with the STS

@@ -13,11 +13,12 @@
 //!    completion list back.
 //!
 //! A class-assigned course book (`bookType = 2`) has assignments that are not
-//! scheduled jobs: its pages come from `/client/books/tree`, the paper from
-//! `xot-api /client/textbook/paperinfo`, and the submit row from the official
-//! reader's "textbook" branch — empty `studyTaskId`, `submitType = 0`, and no
-//! per-question `qstJson`. The same page/upload/preview/submit steps apply,
-//! so both sources share the machinery below.
+//! scheduled jobs: its pages come from `/client/books/tree` and the paper from
+//! `xot-api /client/textbook/paperinfo`. The submit row follows the packaged
+//! reader selected by `packType`: the legacy flipbook path uses `srcType = 1`
+//! and the flattened `qstJson` shape extracted from the reader's local
+//! `TaskStuded` records, while the newer textbook bridge uses `srcType = 2`
+//! with XML in `result`. Both paths keep an empty `studyTaskId` for a page.
 //!
 //! Expired jobs are not blocked: the server accepted late submissions during
 //! recon, so the UI only warns.
@@ -153,18 +154,25 @@ enum TaskSource {
     Book { book_id: String, task_id: String },
 }
 
+struct StoredRecording {
+    url: String,
+    duration_ms: Option<u64>,
+}
+
 struct LoadedTask {
     source: TaskSource,
     title: String,
     paper: ReadAloudPaper,
-    /// `taskId` = `chapterId` = the job's content id, or the book page id.
+    /// `taskId` / content page id used by the score endpoint.
     content_id: String,
+    /// Containing chapter id; course-book pages get this from `parentId`.
+    chapter_id: String,
     book_id: String,
     paper_id: String,
     course_id: String,
     expired: bool,
     submitted: bool,
-    assets: HashMap<String, String>,
+    assets: HashMap<String, StoredRecording>,
 }
 
 impl LoadedTask {
@@ -232,12 +240,13 @@ pub async fn readaloud_upload(
 pub async fn book_readaloud_upload(
     account_id: String,
     book_id: String,
+    course_id: String,
     task_id: String,
     recording: RecordingUpload,
     state: tauri::State<'_, AppState>,
 ) -> CommandResult<UploadView> {
     let (account_id, client) = state.require_client(Some(&account_id))?;
-    let assets_key = book_assets_key(&book_id, &task_id);
+    let assets_key = book_assets_key(&book_id, &course_id, &task_id);
     upload_recording(&state, &account_id, &client, &assets_key, recording).await
 }
 
@@ -402,7 +411,10 @@ fn task_view(loaded: &LoadedTask) -> ReadAloudTaskView {
                 score: question.score,
                 duration: question.duration,
                 audio_url: question.audio_url.clone(),
-                record_url: loaded.assets.get(&question.question_id).cloned(),
+                record_url: loaded
+                    .assets
+                    .get(&question.question_id)
+                    .map(|asset| asset.url.clone()),
             })
             .collect(),
     }
@@ -485,7 +497,9 @@ async fn upload_recording(
                 object_url: record_url.clone(),
                 size: i64::try_from(info.size).unwrap_or(i64::MAX),
                 sha256: info.sha256,
-                duration_ms: None,
+                duration_ms: info
+                    .duration_ms
+                    .map(|duration| i64::try_from(duration).unwrap_or(i64::MAX)),
             },
         )
         .await
@@ -518,17 +532,22 @@ async fn prepare_preview(
     let mut recordings = Vec::with_capacity(loaded.paper.questions.len());
     let mut slots = Vec::with_capacity(loaded.paper.questions.len());
     let mut final_scores = Vec::with_capacity(loaded.paper.questions.len());
+    let mut recording_seconds = 0_i64;
     for question in &loaded.paper.questions {
-        let record_url = loaded
-            .assets
-            .get(&question.question_id)
-            .cloned()
-            .ok_or_else(|| {
-                AppError::new(
-                    "invalid_input",
-                    format!("第 {} 题还没有上传录音", question.number),
-                )
-            })?;
+        let asset = loaded.assets.get(&question.question_id).ok_or_else(|| {
+            AppError::new(
+                "invalid_input",
+                format!("第 {} 题还没有上传录音", question.number),
+            )
+        })?;
+        let record_url = asset.url.clone();
+        let duration_ms = asset.duration_ms;
+        recording_seconds += i64::try_from(
+            duration_ms
+                .unwrap_or_else(|| u64::from(question.duration) * 1000)
+                .div_ceil(1000),
+        )
+        .unwrap_or(i64::MAX);
         let score = scores
             .as_ref()
             .and_then(|list| {
@@ -549,6 +568,7 @@ async fn prepare_preview(
         recordings.push(ReadAloudRecording {
             question_id: question.question_id.clone(),
             record_url: record_url.clone(),
+            duration_ms,
         });
         final_scores.push(score);
         slots.push(PreviewSlotView {
@@ -574,26 +594,57 @@ async fn prepare_preview(
         course_id: loaded.course_id.clone(),
         book_id: loaded.book_id.clone(),
         content_id: loaded.content_id.clone(),
+        chapter_id: loaded.chapter_id.clone(),
         job_id,
         paper_id: loaded.paper_id.clone(),
     };
-    let study_date = adapters::server_time(client)
-        .await
-        .unwrap_or_else(|_| up366_store::now_millis());
-    let seconds: i64 = loaded
-        .paper
-        .questions
-        .iter()
-        .map(|question| i64::from(question.duration))
-        .sum();
-    let row = adapters::build_row(
-        &loaded.paper,
-        &context,
-        &recordings,
-        &final_scores,
-        study_date,
-        seconds,
-    )
+    let seconds = recording_seconds;
+    let (study_date, legacy_reader) = match &loaded.source {
+        TaskSource::Book { .. } => {
+            let (study_date, book_info) = tokio::join!(
+                adapters::server_time(client),
+                adapters::book_info(client, &loaded.book_id, 2),
+            );
+            let pack_type = book_info
+                .map_err(|error| state.session_error(account_id, client, error))?
+                .pack_type
+                .ok_or_else(|| {
+                    AppError::new(
+                        "protocol_drift",
+                        "课本元数据缺少 packType，无法确定朗读提交协议",
+                    )
+                })?;
+            (
+                study_date.unwrap_or_else(|_| up366_store::now_millis()),
+                pack_type < 7,
+            )
+        }
+        TaskSource::Job { .. } => (
+            adapters::server_time(client)
+                .await
+                .unwrap_or_else(|_| up366_store::now_millis()),
+            false,
+        ),
+    };
+    let row = if legacy_reader {
+        adapters::build_legacy_reader_row(
+            &context,
+            &loaded.paper.questions,
+            &recordings,
+            &final_scores,
+            study_date,
+            seconds,
+        )
+    } else {
+        adapters::build_row(
+            &loaded.paper,
+            &context,
+            &recordings,
+            &final_scores,
+            study_date,
+            seconds,
+        )
+    }
     .map_err(AppError::from)?;
     let reported_score = final_scores.iter().sum();
 
@@ -699,7 +750,8 @@ async fn load_job_task(
         },
         title: job.title().to_owned(),
         paper,
-        content_id,
+        content_id: content_id.clone(),
+        chapter_id: content_id,
         book_id,
         paper_id,
         course_id,
@@ -749,6 +801,10 @@ async fn load_book_task(
         .clone()
         .filter(|paper_id| !paper_id.is_empty())
         .ok_or_else(|| AppError::new("protocol_drift", "书本任务缺少 paperId"))?;
+    if page.parent_id.trim().is_empty() {
+        return Err(AppError::new("protocol_drift", "书本任务缺少章节编号"));
+    }
+    let chapter_id = page.parent_id.clone();
 
     let info = adapters::textbook_paperinfo(client, &paper_id)
         .await
@@ -757,7 +813,12 @@ async fn load_book_task(
         adapters::parse_paper(&info.paper_data, info.path_prefix()).map_err(AppError::from)?;
     paper.require_all_read_aloud().map_err(AppError::from)?;
 
-    let assets = load_assets(state, account_id, &book_assets_key(book_id, task_id)).await?;
+    let assets = load_assets(
+        state,
+        account_id,
+        &book_assets_key(book_id, course_id, task_id),
+    )
+    .await?;
     let submitted = adapters::finished_tasks(client, book_id)
         .await
         .map_err(|error| state.session_error(account_id, client, error))?
@@ -776,6 +837,7 @@ async fn load_book_task(
         },
         paper,
         content_id: task_id.to_owned(),
+        chapter_id,
         book_id: book_id.to_owned(),
         paper_id,
         course_id: course_id.to_owned(),
@@ -790,7 +852,7 @@ async fn load_assets(
     state: &AppState,
     account_id: &AccountId,
     assets_key: &str,
-) -> CommandResult<HashMap<String, String>> {
+) -> CommandResult<HashMap<String, StoredRecording>> {
     Ok(state
         .db
         .audio()
@@ -798,13 +860,24 @@ async fn load_assets(
         .await
         .map_err(storage_error)?
         .into_iter()
-        .filter_map(|asset| asset.object_url.map(|url| (asset.question_id, url)))
+        .filter_map(|asset| {
+            let url = asset.object_url?;
+            Some((
+                asset.question_id,
+                StoredRecording {
+                    url,
+                    duration_ms: asset
+                        .duration_ms
+                        .and_then(|duration| u64::try_from(duration).ok()),
+                },
+            ))
+        })
         .collect())
 }
 
 /// The storage key for a course-book page's recordings.
-fn book_assets_key(book_id: &str, task_id: &str) -> String {
-    format!("book:{book_id}:{task_id}")
+fn book_assets_key(book_id: &str, course_id: &str, task_id: &str) -> String {
+    format!("book:{course_id}:{book_id}:{task_id}")
 }
 
 fn storage_error(error: up366_store::StoreError) -> AppError {
@@ -855,7 +928,14 @@ mod tests {
     }
 
     #[test]
-    fn a_book_asset_key_is_namespaced_by_book_and_task() {
-        assert_eq!(book_assets_key("BOOK-1", "TASK-1"), "book:BOOK-1:TASK-1");
+    fn a_book_asset_key_is_namespaced_by_course_book_and_task() {
+        assert_eq!(
+            book_assets_key("BOOK-1", "COURSE-1", "TASK-1"),
+            "book:COURSE-1:BOOK-1:TASK-1"
+        );
+        assert_ne!(
+            book_assets_key("BOOK-1", "COURSE-1", "TASK-1"),
+            book_assets_key("BOOK-1", "COURSE-2", "TASK-1")
+        );
     }
 }
