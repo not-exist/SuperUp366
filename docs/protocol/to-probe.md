@@ -123,7 +123,10 @@ Live attempt on 2026-11-21 for 新概念英语1, Lesson 1 `课文听读`
   populated by `submitEleAttr`. A dry-run for the target produced 21 rows
   (8 question rows plus 13 sentence rows). The first client implementation sent
   the page id as both `taskId` and `chapterId` and sent legacy `extendParams` as
-  an empty string; both differ from the official page context/worker normalization.
-  The corrected chapter association is covered by offline tests. The renderer's
-  exact ASES score attributes and runtime `StudyTaskId/taskNo` remain unresolved,
-  so no further live write is allowed without new explicit approval.
+  an empty string; both differed from the official page context/worker normalization.
+  After correcting those fields, one authorized legacy submission returned
+  `data=null` and persisted successfully: the page gained a finished-task row,
+  task score became 100, all eight question rows gained scores and `myAnswer` URLs,
+  and answer detail score became 100. This closes the course-book legacy shape
+  end to end for this target. No further write is needed; exact renderer
+  `StudyTaskId/taskNo` and ASES attributes remain static unknowns for other pages.
