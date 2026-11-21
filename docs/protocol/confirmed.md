@@ -259,9 +259,14 @@ the page/paper reads are live. The target page raw data identifies
 `chapterId = AD18D359A34CD8813B40A663C5A0AF52` while the content page/task id is
 `DE3C6927A54C4FF17EFB5ACCBA00E09C`; the earlier client rows incorrectly used the
 page id for both fields. The upload worker also normalizes `extendParams` to a
-JSON object before sending. The one live v2 attempt from this client on
-2026-11-21 used the textbook bridge (`srcType = 2`, XML `result`, empty
-`qstJson`) and returned `result.code = 0` but left all eight
+JSON object before sending. A corrected legacy-row attempt on 2026-11-21 used
+`chapterId = AD18D359A34CD8813B40A663C5A0AF52` and object-valued `extendParams`;
+it returned `data=null` but did create the finished-task row, set the task score
+to 100, populated all eight question scores and audio URLs, and made answer
+detail score 100. This is the first end-to-end confirmation of the course-book
+legacy shape. The earlier textbook attempt on 2026-11-21 used the textbook
+bridge (`srcType = 2`, XML `result`, empty `qstJson`) and returned `result.code = 0`
+but left all eight
 `question-score/list` rows at `score = 0`, `myAnswer = ""`, left the book task
 node at score 0, and did not add a `finished-task/list` row. That attempt is
 therefore **not** an end-to-end confirmation of the textbook payload. The
