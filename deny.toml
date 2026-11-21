@@ -10,14 +10,9 @@ all-features = true
 
 [advisories]
 version = 2
+unmaintained = "none"
 yanked = "warn"
 ignore = [
-  # Unmaintained, all pulled in transitively by the dev-only `httpmock` chain
-  # (async-std -> pin-utils) or by the gtk build chain (proc-macro-error).
-  # They never ship in the binary; revisit when httpmock/tauri move off them.
-  "RUSTSEC-2025-0052",
-  "RUSTSEC-2026-0441",
-  "RUSTSEC-2024-0370",
   # libsqlite3-sys 0.30 bundles SQLite 3.53.2 (CVE-2026-119375): exploiting it
   # requires the victim to open an attacker-written database plus a mismatched
   # `-wal` sibling. This client only opens its own app-data database, and sqlx
