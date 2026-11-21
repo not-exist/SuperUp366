@@ -92,8 +92,10 @@ types) stays an open risk until one is recorded.
 
 Static evidence from the official PC reader says a class-book page submits via
 `/client/task/score/submit/v2` with empty `studyTaskId`, `submitType = 0`, empty
-`qstJson`, `taskId = chapterId = page id`, and XML in `result`. That does not
-establish that this shape is accepted for every `packType` or read-aloud paper.
+`qstJson`, `taskId = page id`, `chapterId = page.parentId`, and XML in `result`.
+The upload worker parses `extendParams` from JSON text before sending; an empty
+value becomes the object `{}`. These fields are required to associate the row with
+the page's chapter/task context.
 
 Live attempt on 2026-11-21 for 新概念英语1, Lesson 1 `课文听读`
 (`bookId=B8FB77D2AAAEE151EE2DA265EB9CA6D1`, `courseId=9222783`,
@@ -102,7 +104,8 @@ Live attempt on 2026-11-21 for 新概念英语1, Lesson 1 `课文听读`
 - The account's book metadata reports `packType=0`, `bookType=2`; the page is
   `pageType=0`, `type=1`, `isContent=1` and contains eight type-9 questions.
 - One textbook-bridge v2 request with `srcType=2`, `submitType=0`, empty
-  `studyTaskId` and `qstJson`, and the constructed XML `result` returned success
+  `studyTaskId` and `qstJson`, the page id in both `taskId` and `chapterId`, and
+  the constructed XML `result` returned success
   (`data` absent). Do not retry this
   task with the same or a guessed alternate shape.
 - Read-only checks afterward still showed no `finished-task/list` row, the task
@@ -114,11 +117,13 @@ Live attempt on 2026-11-21 for 新概念英语1, Lesson 1 `课文听读`
   `audio_assets` table with course-scoped keys and measured duration. OSS has no
   delete endpoint in the confirmed API inventory.
 
-- Static extraction now distinguishes two PC branches: `submitAnswerData("textbook")`
+- Static extraction distinguishes two PC branches: `submitAnswerData("textbook")`
   uses `srcType=2` plus XML `result`, while the `packType < 7` flipbook path
   uses `submitTaskV1`/`srcType=1`, an empty `result`, and qstJson previously
-  populated by `submitEleAttr`. A dry-run for this target produced 21 rows
-  (8 question rows plus 13 sentence rows), with `pageId/addTime/order` and
-  stringified `elementAttr`. This is static payload evidence only; it has not
-  been sent because the target page already consumed the one authorized live
-  attempt and the exact renderer score attributes remain incomplete.
+  populated by `submitEleAttr`. A dry-run for the target produced 21 rows
+  (8 question rows plus 13 sentence rows). The first client implementation sent
+  the page id as both `taskId` and `chapterId` and sent legacy `extendParams` as
+  an empty string; both differ from the official page context/worker normalization.
+  The corrected chapter association is covered by offline tests. The renderer's
+  exact ASES score attributes and runtime `StudyTaskId/taskNo` remain unresolved,
+  so no further live write is allowed without new explicit approval.

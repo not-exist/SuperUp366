@@ -163,8 +163,10 @@ struct LoadedTask {
     source: TaskSource,
     title: String,
     paper: ReadAloudPaper,
-    /// `taskId` = `chapterId` = the job's content id, or the book page id.
+    /// `taskId` / content page id used by the score endpoint.
     content_id: String,
+    /// Containing chapter id; course-book pages get this from `parentId`.
+    chapter_id: String,
     book_id: String,
     paper_id: String,
     course_id: String,
@@ -592,6 +594,7 @@ async fn prepare_preview(
         course_id: loaded.course_id.clone(),
         book_id: loaded.book_id.clone(),
         content_id: loaded.content_id.clone(),
+        chapter_id: loaded.chapter_id.clone(),
         job_id,
         paper_id: loaded.paper_id.clone(),
     };
@@ -747,7 +750,8 @@ async fn load_job_task(
         },
         title: job.title().to_owned(),
         paper,
-        content_id,
+        content_id: content_id.clone(),
+        chapter_id: content_id,
         book_id,
         paper_id,
         course_id,
@@ -797,6 +801,10 @@ async fn load_book_task(
         .clone()
         .filter(|paper_id| !paper_id.is_empty())
         .ok_or_else(|| AppError::new("protocol_drift", "书本任务缺少 paperId"))?;
+    if page.parent_id.trim().is_empty() {
+        return Err(AppError::new("protocol_drift", "书本任务缺少章节编号"));
+    }
+    let chapter_id = page.parent_id.clone();
 
     let info = adapters::textbook_paperinfo(client, &paper_id)
         .await
@@ -829,6 +837,7 @@ async fn load_book_task(
         },
         paper,
         content_id: task_id.to_owned(),
+        chapter_id,
         book_id: book_id.to_owned(),
         paper_id,
         course_id: course_id.to_owned(),
