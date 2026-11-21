@@ -165,6 +165,7 @@ export function ReadAloud() {
         ? await api.uploadBookRecording(
             account.account_id,
             bookId ?? "",
+            courseId,
             taskId ?? "",
             slot.question_id,
             picked.path,
