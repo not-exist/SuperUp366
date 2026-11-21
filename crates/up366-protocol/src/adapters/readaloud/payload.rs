@@ -152,8 +152,11 @@ pub struct ReadAloudContext {
     pub client_id: String,
     pub course_id: String,
     pub book_id: String,
-    /// `taskId` = `chapterId` = `contentId`.
+    /// `taskId` / content page id used by the score endpoint.
     pub content_id: String,
+    /// The containing chapter id. Scheduled jobs often use the content id;
+    /// course-book pages use the page's `parentId` from the book tree.
+    pub chapter_id: String,
     /// The scheduled job id. `None` for a course-book page; the caller then
     /// selects the reader-specific row shape and keeps `studyTaskId` empty.
     pub job_id: Option<String>,
@@ -280,7 +283,7 @@ pub fn build_row(
         "taskId": context.content_id,
         "uid": context.uid,
         "bookId": context.book_id,
-        "chapterId": context.content_id,
+        "chapterId": context.chapter_id,
         "taskNo": 1,
         "score": total,
         "percent": percent,
@@ -368,7 +371,7 @@ pub fn build_legacy_reader_row(
         "uid": context.uid,
         "bookId": context.book_id,
         "taskId": context.content_id,
-        "chapterId": context.content_id,
+        "chapterId": context.chapter_id,
         "taskNo": 1,
         "score": total,
         "percent": score_percent(total, max_score),
@@ -382,7 +385,7 @@ pub fn build_legacy_reader_row(
         "failed": 0,
         "studyTaskId": context.job_id.clone().unwrap_or_default(),
         "courseId": context.course_id,
-        "extendParams": "",
+        "extendParams": {},
         "qstJson": qst_json,
         "killStudyTask": 0,
         "submitType": 0,
@@ -489,6 +492,7 @@ mod tests {
             course_id: "9222783".to_owned(),
             book_id: "BOOK".to_owned(),
             content_id: "CONTENT".to_owned(),
+            chapter_id: "CHAPTER".to_owned(),
             job_id: Some("JOB".to_owned()),
             paper_id: "PAPER".to_owned(),
         }
@@ -508,7 +512,7 @@ mod tests {
 
         assert_eq!(row["studyTaskId"], "JOB");
         assert_eq!(row["taskId"], "CONTENT");
-        assert_eq!(row["chapterId"], "CONTENT");
+        assert_eq!(row["chapterId"], "CHAPTER");
         assert_eq!(row["score"], 16.0);
         assert_eq!(row["percent"], 80.0);
         // Two parent rows plus three sentence rows.
@@ -587,6 +591,7 @@ mod tests {
         assert_eq!(row["result"], "");
         assert_eq!(row["studyTaskId"], "JOB");
         assert_eq!(row["submitType"], 0);
+        assert!(row["extendParams"].is_object());
         assert_eq!(row["qstJson"].as_array().unwrap().len(), 5);
         assert_eq!(row["qstJson"][0]["elementType"], 1);
         assert_eq!(row["qstJson"][1]["elementType"], 2);
