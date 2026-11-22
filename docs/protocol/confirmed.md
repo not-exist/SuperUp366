@@ -228,9 +228,22 @@ job-id join can never resolve. The official reader still submits them through
   textbook branch posts branch A with
   `result = {studentid, testInfo:{answerdata, markdatao}}` and `qstJson=""`.
   For a book page `studyTaskId` is empty, so the reader sets
-  `submitType = studyTaskId ? 4 : 0` — **0**, not 8. `taskId` and `chapterId`
-  are both the page id. **[R]** `textbook.<hash>.js`, main-window.js
+  `submitType = studyTaskId ? 4 : 0` — **0**, not 8. `taskId` is the page id,
+  while `chapterId` is the containing chapter's `parentId` from the book tree.
+  **[R]** `textbook.<hash>.js`, main-window.js; **[S]** target page raw data.
   `submitAnswerData`.
+- Legacy PC reader branch: extracted `main-window.js` also exposes
+  `submitTaskV1`. It calls `uploadTaskScore` with `srcType = 1`, an empty
+  `result`, `qstJson = ""` at the initial row boundary, and the current window's
+  `StudyTaskId`. Before upload, `submitEleAttr` has already stored each
+  `{pageId, elementId, elementType, addTime, order, elementAttr}` row in
+  `TaskStuded.qstJson`; `elementAttr` is stored as a JSON string and the upload
+  worker flattens the keyed object to an array. For `packType < 7`, this legacy
+  row is the relevant reader shape; the two branches must not be conflated.
+  **[R]** `extract/app/dist/main/main-window.js`. The upload worker also parses
+  `extendParams` from its local JSON string before sending the row, so the final
+  wire value is an object (an empty value becomes `{}`). **[R]**
+  `extract/app/dist/main/main-window.js`.
 - Completion: `/client/book/finished-task/list {bookId}` gains a row whose
   `taskId` is the page id — the same id the book detail intersects for its
   progress.
@@ -241,9 +254,24 @@ job-id join can never resolve. The official reader still submits them through
   read-aloud-only: the Lesson 1 听读 paper (70-point group + 30-point
   recording) is read-aloud-only. **[S]**
 
-The row above is read from the official reader bundle and the read-only probes
-are live; a live submission from this client has not been recorded yet (see
-`to-probe.md` §12).
+Both course-book branch shapes are observed in the official reader bundle, and
+the page/paper reads are live. The target page raw data identifies
+`chapterId = AD18D359A34CD8813B40A663C5A0AF52` while the content page/task id is
+`DE3C6927A54C4FF17EFB5ACCBA00E09C`; the earlier client rows incorrectly used the
+page id for both fields. The upload worker also normalizes `extendParams` to a
+JSON object before sending. A corrected legacy-row attempt on 2026-11-21 used
+`chapterId = AD18D359A34CD8813B40A663C5A0AF52` and object-valued `extendParams`;
+it returned `data=null` but did create the finished-task row, set the task score
+to 100, populated all eight question scores and audio URLs, and made answer
+detail score 100. This is the first end-to-end confirmation of the course-book
+legacy shape. The earlier textbook attempt on 2026-11-21 used the textbook
+bridge (`srcType = 2`, XML `result`, empty `qstJson`) and returned `result.code = 0`
+but left all eight
+`question-score/list` rows at `score = 0`, `myAnswer = ""`, left the book task
+node at score 0, and did not add a `finished-task/list` row. That attempt is
+therefore **not** an end-to-end confirmation of the textbook payload. The
+`packType < 7` legacy row is static evidence only and has not been sent; see
+`to-probe.md` §12 for the exact target, observations and no-retry boundary.
 
 ## Applied writing (应用文)
 

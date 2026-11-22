@@ -128,6 +128,7 @@ export const api = {
   uploadBookRecording: (
     accountId: string,
     bookId: string,
+    courseId: string,
     taskId: string,
     questionId: string,
     path: string,
@@ -136,6 +137,7 @@ export const api = {
     invokeCommand("book_readaloud_upload", {
       account_id: accountId,
       book_id: bookId,
+      course_id: courseId,
       task_id: taskId,
       recording: { question_id: questionId, path, file_name: fileName },
     }),
