@@ -28,7 +28,7 @@ up366-media = { path = "crates/up366-media" }
 base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 flate2 = "1"
-hmac = "0.12"
+hmac = "0.13"
 httpmock = "0.9"
 keyring = "3"
 md-5 = "0.10"
