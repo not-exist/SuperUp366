@@ -85,6 +85,16 @@ pub(crate) async fn find_job(
     .ok_or_else(|| AppError::new("not_found", "作业不在缓存中，请先刷新作业列表"))
 }
 
+/// The localized form of the server's `-13` ("already submitted / attempts
+/// exhausted"). Submit commands use it so the UI does not show the protocol
+/// layer's English wording; a write is never retried after this answer.
+pub(crate) fn duplicate_submission_error() -> AppError {
+    AppError::new(
+        "duplicate_submission",
+        "服务端拒绝重复提交：该作业已提交或作答次数已用完",
+    )
+}
+
 /// Whether the account has already submitted this job.
 ///
 /// The job's own status is checked first, then the status cache, and finally

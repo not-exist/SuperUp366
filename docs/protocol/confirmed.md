@@ -269,9 +269,24 @@ bridge (`srcType = 2`, XML `result`, empty `qstJson`) and returned `result.code 
 but left all eight
 `question-score/list` rows at `score = 0`, `myAnswer = ""`, left the book task
 node at score 0, and did not add a `finished-task/list` row. That attempt is
-therefore **not** an end-to-end confirmation of the textbook payload. The
-`packType < 7` legacy row is static evidence only and has not been sent; see
-`to-probe.md` §12 for the exact target, observations and no-retry boundary.
+therefore **not** an end-to-end confirmation of the textbook payload.
+
+A duplicate resubmission of the corrected legacy row on 2026-11-25 (identical
+`studyDate`, `qstJson`, scores and OSS URLs; only the per-request random `id`
+and `batchTag` regenerated) was accepted: `code = 0`, `data = null`. No second
+`finished-task/list` row appeared and scores stayed at 100, but the existing
+row was updated in place: `addDate` advanced, `batchId` was replaced, a `guid`
+appeared, `studyDate` took the submitted `1795262820215`, and `seconds`
+accumulated from 1628 to 3256 on the finished row, the task node and the answer
+detail. So the course-book path has no duplicate rejection (the `-13`
+"already submitted" code did not fire), and every resubmission inflates the
+reported study time. See `to-probe.md` §12 for the exact target and
+observations.
+
+The client now allows an explicit second preview/submit for read-aloud tasks.
+The one-shot confirmation token still prevents replaying a single preview; the
+course-book branch accepts the duplicate, while a scheduled job may answer
+`-13` (already submitted / attempts exhausted).
 
 ## Applied writing (应用文)
 

@@ -71,3 +71,33 @@ test.describe("朗读跟读", () => {
     await expect(page.getByTestId("confirm-dialog")).toBeVisible();
   });
 });
+
+test.describe("朗读重新提交", () => {
+  test("已提交的任务可以重新提交", async ({ page }) => {
+    await openRoute(page, "/jobs/job-1-9/readaloud", {
+      submittedReadAloud: ["job-1-9"],
+    });
+    await expect(page.getByTestId("readaloud-page")).toBeVisible();
+    await expect(page.getByText("已提交 · 可重新提交")).toBeVisible();
+    await expect(page.getByTestId("readaloud-pick-1")).toBeEnabled();
+
+    for (let slot = 1; slot <= 5; slot += 1) {
+      const chooser = page.waitForEvent("filechooser");
+      await page.getByTestId(`readaloud-pick-${slot}`).click();
+      await (await chooser).setFiles(MP3);
+      await expect(
+        page.getByTestId(`readaloud-status-${slot}`),
+      ).toContainText("已上传");
+    }
+
+    await page.getByTestId("readaloud-preview").click();
+    await expect(page.getByTestId("confirm-dialog")).toContainText(
+      "确认重新提交朗读成绩",
+    );
+    await expect(page.getByTestId("confirm-dialog")).toContainText("累加");
+    await page.getByTestId("confirm-submit").click();
+    await expect(page.getByTestId("readaloud-result")).toContainText(
+      "重新提交成功",
+    );
+  });
+});

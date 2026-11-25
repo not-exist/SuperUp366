@@ -90,6 +90,34 @@ test.describe("书籍", () => {
     await expect(page.getByTestId("book-hero")).toBeVisible();
   });
 
+  test("已提交的班级课本朗读可以重新提交", async ({ page }) => {
+    await openRoute(page, "/books/book-4?type=2&course=course-1", {
+      submittedReadAloud: ["book-4-c1-j2"],
+    });
+    await page.getByTestId("book-job-book-4-c1-j2").click();
+
+    await expect(page.getByTestId("readaloud-page")).toBeVisible();
+    await expect(page.getByText("已提交 · 可重新提交")).toBeVisible();
+
+    for (let slot = 1; slot <= 5; slot += 1) {
+      const chooser = page.waitForEvent("filechooser");
+      await page.getByTestId(`readaloud-pick-${slot}`).click();
+      await (await chooser).setFiles(MP3);
+      await expect(
+        page.getByTestId(`readaloud-status-${slot}`),
+      ).toContainText("已上传");
+    }
+
+    await page.getByTestId("readaloud-preview").click();
+    await expect(page.getByTestId("confirm-dialog")).toContainText(
+      "确认重新提交朗读成绩",
+    );
+    await page.getByTestId("confirm-submit").click();
+    await expect(page.getByTestId("readaloud-result")).toContainText(
+      "重新提交成功",
+    );
+  });
+
   test("打开只读的单词任务", async ({ page }) => {
     await openRoute(page, "/books/book-1?type=1&course=course-1");
     await page.getByTestId("book-job-book-1-c1-j4").click();

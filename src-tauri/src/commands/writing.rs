@@ -1,5 +1,12 @@
 //! Applied-writing (应用文) commands: detect the paper, preview the answer XML,
-//! submit once.
+//! submit once per preview.
+//!
+//! A finished job can be previewed and submitted again; the single-use token
+//! prevents replaying one preview, not an explicit new submission. The server's
+//! behavior for a repeated writing submission is not verified yet: it may
+//! accept and update the task, or answer `-13` (already submitted / attempts
+//! exhausted), which the command surfaces as a localized `duplicate_submission`
+//! and never retries.
 //!
 //! The paper is the authority: a writing question is `question_type = 14`
 //! (`应用文写作`). A mixed paper is refused because this client can only answer
@@ -59,6 +66,10 @@ pub struct AppliedWritingPreviewView {
     pub job_id: String,
     pub title: String,
     pub total_score: f64,
+    /// Whether this preview is a resubmission of an already-finished job.
+    pub resubmit: bool,
+    /// Study seconds this submission reports.
+    pub seconds: i64,
     pub answers: Vec<PreviewAnswerView>,
     /// The exact `answerData` XML a submission would carry.
     pub answer_data: String,
@@ -80,6 +91,8 @@ pub struct AppliedWritingSubmitView {
     pub ok: bool,
     /// Whether the account-wide finished list already shows the job.
     pub verified: bool,
+    /// Whether this submission replaced an already-finished job.
+    pub resubmitted: bool,
     pub score: Option<f64>,
     pub message: String,
 }
@@ -90,6 +103,8 @@ struct PendingWriting {
     job_id: String,
     course_id: String,
     paper_id: String,
+    /// The job was already finished when this preview was built.
+    resubmit: bool,
     /// The job's `contentId`, which is the `testId` the H5 page sends.
     content_id: String,
     uid: i64,
@@ -134,13 +149,6 @@ pub async fn applied_writing_preview(
 ) -> CommandResult<AppliedWritingPreviewView> {
     let (account_id, client) = state.require_client(Some(&account_id))?;
     let loaded = load_writing(&state, &account_id, &client, &job_id).await?;
-    if loaded.submitted {
-        return Err(AppError::new(
-            "duplicate_submission",
-            "该作业已提交，不能重复提交",
-        ));
-    }
-
     // Reject an answer for a question that is not in the paper: it would be
     // silently dropped and make the count check misleading.
     for answer in &answers {
@@ -165,6 +173,10 @@ pub async fn applied_writing_preview(
         .collect();
     let answer_data = build_answer_data(&loaded.paper, &answers).map_err(AppError::from)?;
 
+    // The job may already be finished: resubmission is allowed and the server
+    // decides whether it accepts another answer document.
+    let resubmit = loaded.submitted;
+
     let uid: i64 = uid_for(&state, &account_id, &client)
         .await?
         .parse()
@@ -177,6 +189,7 @@ pub async fn applied_writing_preview(
         job_id: loaded.job_id.clone(),
         course_id: loaded.course_id.clone(),
         paper_id: loaded.paper_id.clone(),
+        resubmit,
         content_id: loaded.content_id.clone(),
         uid,
         answer_data: answer_data.clone(),
@@ -213,6 +226,8 @@ pub async fn applied_writing_preview(
         job_id: loaded.job_id,
         title: loaded.title,
         total_score: loaded.paper.total_score,
+        resubmit,
+        seconds,
         answers: preview_answers,
         answer_data,
         confirm_token,
@@ -254,7 +269,12 @@ pub async fn applied_writing_submit(
     };
     submit_applied_writing(&client, &submission)
         .await
-        .map_err(|error| state.session_error(&account_id, &client, error))?;
+        .map_err(|error| match &error {
+            up366_protocol::ProtocolError::Api { code: -13, .. } => {
+                crate::commands::duplicate_submission_error()
+            }
+            _ => state.session_error(&account_id, &client, error),
+        })?;
 
     let (verified, score, _batch_id) = verify_finished_job(
         &state,
@@ -269,8 +289,11 @@ pub async fn applied_writing_submit(
     Ok(AppliedWritingSubmitView {
         ok: true,
         verified,
+        resubmitted: pending.resubmit,
         score,
-        message: if verified {
+        message: if verified && pending.resubmit {
+            "重新提交成功".to_owned()
+        } else if verified {
             "提交成功".to_owned()
         } else {
             "服务端已返回成功，但完成列表尚未刷新，请稍后重新加载作业".to_owned()
@@ -414,6 +437,7 @@ mod tests {
             uid: 39370562,
             answer_data: "<elements/>".to_owned(),
             total_score: 15.0,
+            resubmit: false,
             seconds: 42,
             begin_time: 1_700_000_000_000,
             end_time: 1_700_000_042_000,
@@ -422,6 +446,7 @@ mod tests {
         let back: PendingWriting = serde_json::from_value(value).unwrap();
         assert_eq!(back.job_id, "JOB-1");
         assert_eq!(back.seconds, 42);
+        assert!(!back.resubmit);
         assert_eq!(back.answer_data, "<elements/>");
     }
 }

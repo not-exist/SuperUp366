@@ -215,7 +215,10 @@ export function ReadAloud() {
           )
         : api.previewReadAloud(account.account_id, jobId ?? "", scoreRows);
     },
-    onSuccess: (data) => setPreview(data),
+    onSuccess: (data) => {
+      setConfirmed(null);
+      setPreview(data);
+    },
   });
 
   const submitMutation = useMutation({
@@ -272,9 +275,13 @@ export function ReadAloud() {
       )}
 
       {submitted && (
-        <div className="banner banner--success" role="status">
-          <strong>已提交</strong>
-          <span>该作业的朗读成绩已经提交，服务端可能继续按录音复评。</span>
+        <div className="banner banner--warning" role="note">
+          <strong>已提交 · 可重新提交</strong>
+          <span>
+            {bookMode
+              ? "该课本任务已有提交记录。重新提交会更新成绩与答题详情，并累加学习时长。"
+              : "该作业已有提交记录。重新提交可能被服务端拒绝（已提交/次数用尽），请留意返回结果。"}
+          </span>
         </div>
       )}
 
@@ -284,7 +291,13 @@ export function ReadAloud() {
           role="status"
           data-testid="readaloud-result"
         >
-          <strong>{confirmed.verified ? "提交成功" : "已发送，等待服务端刷新"}</strong>
+          <strong>
+            {confirmed.resubmitted
+              ? "重新提交成功"
+              : confirmed.verified
+                ? "提交成功"
+                : "已发送，等待服务端刷新"}
+          </strong>
           <span>{confirmed.message}</span>
         </div>
       )}
@@ -315,9 +328,7 @@ export function ReadAloud() {
               className="button button--primary"
               data-testid="readaloud-preview"
               onClick={() => previewMutation.mutate()}
-              disabled={
-                !allUploaded || submitted || previewMutation.isPending || confirmed !== null
-              }
+              disabled={!allUploaded || previewMutation.isPending}
             >
               <UploadIcon />
               {previewMutation.isPending ? "准备中…" : "预览并提交"}
@@ -376,7 +387,7 @@ export function ReadAloud() {
                       className="button"
                       data-testid={`readaloud-pick-${slot.number}`}
                       onClick={() => void handlePick(slot)}
-                      disabled={submitted || status === "uploading"}
+                      disabled={status === "uploading"}
                     >
                       选择 mp3
                     </button>
@@ -391,7 +402,6 @@ export function ReadAloud() {
                       max={slot.score}
                       step={0.5}
                       value={scoreFor(slot)}
-                      disabled={submitted}
                       onChange={(event) => {
                         const value = Number(event.currentTarget.value);
                         setScores((previous) => ({
@@ -417,14 +427,22 @@ export function ReadAloud() {
 
       <ConfirmDialog
         open={preview !== null}
-        title="确认提交朗读成绩"
+        title={preview?.resubmit ? "确认重新提交朗读成绩" : "确认提交朗读成绩"}
         summary={
           preview ? (
             <>
               <p>
                 共 {preview.slots.length} 题，上报 {preview.reported_score} /{" "}
-                {preview.total_score} 分。提交后同一作业不能重复提交。
+                {preview.total_score} 分。
+                {preview.resubmit
+                  ? "这是重新提交：服务端会更新该任务的成绩与答题详情。"
+                  : "提交后仍可再次预览并重新提交。"}
               </p>
+              {preview.resubmit && (
+                <p className="field-hint" role="note">
+                  本次将上报 {preview.seconds} 秒学习时长；服务端会在已有时长上累加。
+                </p>
+              )}
               <ul className="summary-list">
                 {preview.slots.map((slot) => (
                   <li key={slot.question_id}>
@@ -435,7 +453,7 @@ export function ReadAloud() {
             </>
           ) : null
         }
-        confirmLabel="确认提交"
+        confirmLabel={preview?.resubmit ? "确认重新提交" : "确认提交"}
         tone="danger"
         busy={submitMutation.isPending}
         onConfirm={() => submitMutation.mutate()}

@@ -310,6 +310,10 @@ export interface ReadAloudPreview {
   title: string;
   total_score: number;
   reported_score: number;
+  /** Whether this is a resubmission of a finished task. */
+  resubmit: boolean;
+  /** Study seconds this submission reports, which the server accumulates on resubmit. */
+  seconds: number;
   /** The exact row a submission would carry. */
   row: Record<string, unknown>;
   slots: ReadAloudPreviewSlot[];
@@ -320,6 +324,8 @@ export interface ReadAloudPreview {
 export interface ReadAloudSubmit {
   ok: boolean;
   verified: boolean;
+  /** Whether this submission replaced an already-finished task. */
+  resubmitted: boolean;
   score: number | null;
   batch_id: string | null;
   message: string;
@@ -366,6 +372,10 @@ export interface AppliedWritingPreview {
   job_id: string;
   title: string;
   total_score: number;
+  /** Whether this is a resubmission of a finished job. */
+  resubmit: boolean;
+  /** Study seconds this submission reports, in seconds. */
+  seconds: number;
   answers: AppliedWritingPreviewAnswer[];
   /** The exact `answerData` XML a submission would carry. */
   answer_data: string;
@@ -376,6 +386,8 @@ export interface AppliedWritingPreview {
 export interface AppliedWritingSubmit {
   ok: boolean;
   verified: boolean;
+  /** Whether this submission replaced an already-finished job. */
+  resubmitted: boolean;
   score: number | null;
   message: string;
 }
