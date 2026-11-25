@@ -449,6 +449,10 @@ const readAloudSentences = [
 ];
 
 const uploads = new Map<string, string>();
+/** Tasks whose read-aloud submission already succeeded in this mock session. */
+const submittedReadAloud = new Set<string>();
+/** Task id carried by the latest read-aloud preview, consumed on submit. */
+let pendingReadAloudTaskId: string | null = null;
 
 function readAloudTask(jobId: string): ReadAloudTask {
   const job = jobs.find((row) => row.job_id === jobId);
@@ -469,7 +473,7 @@ function readAloudTask(jobId: string): ReadAloudTask {
   return {
     job_id: jobId,
     title: job?.name ?? "课文跟读",
-    submitted: false,
+    submitted: submittedReadAloud.has(jobId),
     expired: false,
     question_count: slots.length,
     sentence_count: slots.length,
@@ -516,6 +520,8 @@ function mockPreview(
   scores?: { question_id: string; score: number }[],
 ): ReadAloudPreview {
   const task = readAloudTask(taskId);
+  pendingReadAloudTaskId = taskId;
+  const resubmit = submittedReadAloud.has(taskId);
   const slots = task.slots.map((slot) => {
     const score =
       scores?.find((entry) => entry.question_id === slot.question_id)?.score ??
@@ -536,6 +542,8 @@ function mockPreview(
     title: task.title,
     total_score: task.total_score,
     reported_score: slots.reduce((sum, slot) => sum + slot.score, 0),
+    resubmit,
+    seconds: task.slots.reduce((sum, slot) => sum + slot.duration, 0),
     // A book page has no job id, so its row carries an empty `studyTaskId`
     // and `submitType = 0`, matching the reader's textbook branch.
     row: taskId.startsWith("book-")
@@ -595,6 +603,8 @@ function mockWritingPreview(
     job_id: jobId,
     title: task.title,
     total_score: task.total_score,
+    resubmit: submittedWritingJobs.has(jobId),
+    seconds: task.questions.reduce((sum, question) => sum + question.duration, 0),
     answers: task.questions.map((question) => {
       const answer = answers.find((entry) => entry.question_id === question.question_id);
       return {
@@ -837,12 +847,19 @@ export async function handleMock(
           retryable: false,
         };
       }
+      const taskId = pendingReadAloudTaskId;
+      pendingReadAloudTaskId = null;
+      const resubmitted = taskId !== null && submittedReadAloud.has(taskId);
+      if (taskId !== null) submittedReadAloud.add(taskId);
       return {
         ok: true,
         verified: true,
+        resubmitted,
         score: 30,
         batch_id: "mock-batch",
-        message: "提交成功（预览环境，未发送到服务器）。",
+        message: resubmitted
+          ? "重新提交成功（预览环境，未发送到服务器）。"
+          : "提交成功（预览环境，未发送到服务器）。",
       } satisfies ReadAloudSubmit;
     }
 
@@ -871,6 +888,7 @@ export async function handleMock(
         };
       }
       pendingWritingJobs.delete(confirm_token);
+      const resubmitted = submittedWritingJobs.has(jobId);
       const submitted = jobs.find((row) => row.job_id === jobId);
       if (submitted) {
         submittedWritingJobs.add(submitted.job_id);
@@ -880,8 +898,11 @@ export async function handleMock(
       return {
         ok: true,
         verified: true,
+        resubmitted,
         score: 12,
-        message: "提交成功（预览环境，未发送到服务器）。",
+        message: resubmitted
+          ? "重新提交成功（预览环境，未发送到服务器）。"
+          : "提交成功（预览环境，未发送到服务器）。",
       } satisfies AppliedWritingSubmit;
     }
 
@@ -1005,6 +1026,8 @@ export interface MockError {
 export interface MockBootstrap {
   /** Replace the stored account list (an empty array shows first-run login). */
   accounts?: Account[];
+  /** Seed already-submitted read-aloud task ids for e2e tests. */
+  submittedReadAloud?: string[];
   /** Replace the job list; an empty array exercises the empty state. */
   jobs?: JobRow[];
   /** Replace the shelf; an empty array exercises the empty state. */
@@ -1058,6 +1081,8 @@ export function resetMock(options?: MockBootstrap): void {
   jobs = buildJobs();
   booksOverride = null;
   uploads.clear();
+  submittedReadAloud.clear();
+  pendingReadAloudTaskId = null;
   settings = seedDefaults(DEFAULT_SETTINGS);
   correctionRemaining = 12;
   correctionDraws = 0;
@@ -1079,6 +1104,9 @@ function applyBootstrap(options?: MockBootstrap): void {
   }
   if (options.books) {
     booksOverride = options.books.map((book) => ({ ...book }));
+  }
+  for (const taskId of options.submittedReadAloud ?? []) {
+    submittedReadAloud.add(taskId);
   }
   if (options.settings) {
     settings = seedDefaults(options.settings);

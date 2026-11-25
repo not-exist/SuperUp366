@@ -12,6 +12,14 @@
 //! 4. `readaloud_submit` consumes the token, posts once, then reads the
 //!    completion list back.
 //!
+//! A finished task can be previewed and submitted again: the single-use token
+//! only prevents replaying one preview, not an explicit new submission. The
+//! course-book branch was verified live on 2026-11-25: the server accepts the
+//! duplicate, updates the finished row in place and accumulates `seconds`. A
+//! scheduled job may answer `-13` (already submitted / attempts exhausted); the
+//! command surfaces that as a localized `duplicate_submission` and never
+//! retries.
+//!
 //! A class-assigned course book (`bookType = 2`) has assignments that are not
 //! scheduled jobs: its pages come from `/client/books/tree` and the paper from
 //! `xot-api /client/textbook/paperinfo`. The submit row follows the packaged
@@ -92,6 +100,10 @@ pub struct ReadAloudPreviewView {
     pub title: String,
     pub total_score: f64,
     pub reported_score: f64,
+    /// Whether this preview is a resubmission of an already-finished task.
+    pub resubmit: bool,
+    /// Study seconds this row reports. A resubmission accumulates them.
+    pub seconds: i64,
     /// The exact row a submission would carry.
     pub row: Value,
     pub slots: Vec<PreviewSlotView>,
@@ -105,6 +117,8 @@ pub struct ReadAloudSubmitView {
     pub ok: bool,
     /// Whether the completion list already shows the task.
     pub verified: bool,
+    /// Whether this submission replaced an already-finished task.
+    pub resubmitted: bool,
     pub score: Option<f64>,
     pub batch_id: Option<String>,
     pub message: String,
@@ -142,6 +156,8 @@ enum PendingTarget {
 struct PendingReadAloud {
     target: PendingTarget,
     total_score: f64,
+    /// The task was already finished when this preview was built.
+    resubmit: bool,
     row: Value,
 }
 
@@ -311,7 +327,12 @@ pub async fn readaloud_submit(
 
     adapters::submit_readaloud(&client, &pending.row, client.now_ms())
         .await
-        .map_err(|error| state.session_error(&account_id, &client, error))?;
+        .map_err(|error| match &error {
+            up366_protocol::ProtocolError::Api { code: -13, .. } => {
+                crate::commands::duplicate_submission_error()
+            }
+            _ => state.session_error(&account_id, &client, error),
+        })?;
 
     let (verified, score, batch_id) =
         verify_finished(&state, &account_id, &client, &pending).await?;
@@ -319,18 +340,27 @@ pub async fn readaloud_submit(
     Ok(ReadAloudSubmitView {
         ok: true,
         verified,
+        resubmitted: pending.resubmit,
         score,
         batch_id,
-        message: match (&pending.target, verified) {
-            (_, true) => "提交成功".to_owned(),
-            (PendingTarget::Book { .. }, false) => {
-                "服务端已返回成功，但书本完成列表尚未刷新，请稍后重新加载书籍".to_owned()
-            }
-            (PendingTarget::Job { .. }, false) => {
-                "服务端已返回成功，但完成列表尚未刷新，请稍后重新加载作业".to_owned()
-            }
-        },
+        message: submit_message(&pending.target, pending.resubmit, verified),
     })
+}
+
+/// The message the result banner shows. Unverified submissions keep the
+/// existing "list has not refreshed" wording; a verified resubmission is named
+/// as such instead of pretending it was the first submission.
+fn submit_message(target: &PendingTarget, resubmit: bool, verified: bool) -> String {
+    match (target, verified) {
+        (_, true) if resubmit => "重新提交成功".to_owned(),
+        (_, true) => "提交成功".to_owned(),
+        (PendingTarget::Book { .. }, false) => {
+            "服务端已返回成功，但书本完成列表尚未刷新，请稍后重新加载书籍".to_owned()
+        }
+        (PendingTarget::Job { .. }, false) => {
+            "服务端已返回成功，但完成列表尚未刷新，请稍后重新加载作业".to_owned()
+        }
+    }
 }
 
 /// Read the completion list back. The endpoint is account-wide for jobs and
@@ -522,12 +552,10 @@ async fn prepare_preview(
     loaded: LoadedTask,
     scores: Option<Vec<ScoreInput>>,
 ) -> CommandResult<ReadAloudPreviewView> {
-    if loaded.submitted {
-        return Err(AppError::new(
-            "duplicate_submission",
-            "该作业已提交，不能重复提交",
-        ));
-    }
+    // The task may already be finished: resubmission is allowed, the server
+    // decides whether it accepts another row. Keep the flag for the dialog and
+    // the submit message.
+    let resubmit = loaded.submitted;
 
     let mut recordings = Vec::with_capacity(loaded.paper.questions.len());
     let mut slots = Vec::with_capacity(loaded.paper.questions.len());
@@ -662,6 +690,7 @@ async fn prepare_preview(
     let pending = PendingReadAloud {
         target,
         total_score: loaded.paper.total_score,
+        resubmit,
         row: row.clone(),
     };
     let payload = serde_json::to_value(&pending)
@@ -677,6 +706,8 @@ async fn prepare_preview(
         title: loaded.title,
         total_score: loaded.paper.total_score,
         reported_score,
+        resubmit,
+        seconds,
         row,
         slots,
         confirm_token,
@@ -896,6 +927,7 @@ mod tests {
                 course_id: "COURSE-1".to_owned(),
             },
             total_score: 30.0,
+            resubmit: false,
             row: serde_json::json!({ "studyTaskId": "JOB-1" }),
         };
         let value = serde_json::to_value(&pending).unwrap();
@@ -916,6 +948,7 @@ mod tests {
                 task_id: "TASK-1".to_owned(),
             },
             total_score: 100.0,
+            resubmit: true,
             row: serde_json::json!({ "studyTaskId": "", "submitType": 0 }),
         };
         let back: PendingReadAloud =
@@ -925,6 +958,38 @@ mod tests {
             PendingTarget::Book { ref task_id, .. } if task_id == "TASK-1"
         ));
         assert_eq!(back.row["submitType"], 0);
+    }
+
+    #[test]
+    fn a_resubmission_round_trips_through_the_token_payload() {
+        let pending = PendingReadAloud {
+            target: PendingTarget::Book {
+                book_id: "BOOK-1".to_owned(),
+                task_id: "TASK-1".to_owned(),
+            },
+            total_score: 100.0,
+            resubmit: true,
+            row: serde_json::json!({ "studyTaskId": "", "submitType": 0 }),
+        };
+        let back: PendingReadAloud =
+            serde_json::from_value(serde_json::to_value(&pending).unwrap()).unwrap();
+        assert!(back.resubmit);
+    }
+
+    #[test]
+    fn the_submit_message_names_a_resubmission_only_when_verified() {
+        let book = PendingTarget::Book {
+            book_id: "BOOK-1".to_owned(),
+            task_id: "TASK-1".to_owned(),
+        };
+        let job = PendingTarget::Job {
+            job_id: "JOB-1".to_owned(),
+            course_id: "COURSE-1".to_owned(),
+        };
+        assert_eq!(submit_message(&book, true, true), "重新提交成功");
+        assert_eq!(submit_message(&book, false, true), "提交成功");
+        assert!(submit_message(&book, true, false).contains("书本完成列表尚未刷新"));
+        assert!(submit_message(&job, true, false).contains("完成列表尚未刷新"));
     }
 
     #[test]

@@ -64,7 +64,10 @@ export function AppliedWriting() {
         answers,
         studySeconds(startedAt.current),
       ),
-    onSuccess: (data) => setPreview(data),
+    onSuccess: (data) => {
+      setConfirmed(null);
+      setPreview(data);
+    },
   });
 
   const submitMutation = useMutation({
@@ -118,9 +121,11 @@ export function AppliedWriting() {
       )}
 
       {submitted && (
-        <div className="banner banner--success" role="status">
-          <strong>已提交</strong>
-          <span>该作业已经提交，不能再次提交。</span>
+        <div className="banner banner--warning" role="note">
+          <strong>已提交 · 可重新提交</strong>
+          <span>
+            该作业已有提交记录。重新提交可能被服务端拒绝（已提交/次数用尽），也可能按任务更新成绩；以返回结果为准。
+          </span>
         </div>
       )}
 
@@ -130,7 +135,13 @@ export function AppliedWriting() {
           role="status"
           data-testid="writing-result"
         >
-          <strong>{confirmed.verified ? "提交成功" : "已发送，等待服务端刷新"}</strong>
+          <strong>
+            {confirmed.resubmitted
+              ? "重新提交成功"
+              : confirmed.verified
+                ? "提交成功"
+                : "已发送，等待服务端刷新"}
+          </strong>
           <span>
             {confirmed.message}
             {confirmed.score != null ? ` · 当前分数 ${confirmed.score}` : ""}
@@ -159,9 +170,7 @@ export function AppliedWriting() {
               className="button button--primary"
               data-testid="writing-preview"
               onClick={() => previewMutation.mutate()}
-              disabled={
-                !allFilled || submitted || previewMutation.isPending || confirmed !== null
-              }
+              disabled={!allFilled || previewMutation.isPending}
             >
               <UploadIcon />
               {previewMutation.isPending ? "准备中…" : "预览并提交"}
@@ -183,7 +192,7 @@ export function AppliedWriting() {
             <div>
               <strong>计分说明</strong>
               <span>
-                本机不生成作文分数；答案提交后由服务端批改。同一作业只能提交一次。
+                本机不生成作文分数；答案提交后由服务端批改。提交后仍可重新提交，重复提交的服务端行为以实际返回为准。
               </span>
             </div>
           </div>
@@ -213,7 +222,6 @@ export function AppliedWriting() {
                     maxLength={3000}
                     value={texts[question.question_id] ?? ""}
                     placeholder="在此输入英文作文"
-                    disabled={submitted || confirmed !== null}
                     onChange={(event) => {
                       const value = event.currentTarget.value;
                       setTexts((previous) => ({
@@ -237,14 +245,22 @@ export function AppliedWriting() {
 
       <ConfirmDialog
         open={preview !== null}
-        title="确认提交应用文"
+        title={preview?.resubmit ? "确认重新提交应用文" : "确认提交应用文"}
         summary={
           preview ? (
             <>
               <p>
                 {preview.title} · 共 {preview.answers.length} 题 · 满分{" "}
-                {preview.total_score}。提交后不能重复提交，作文由服务端批改。
+                {preview.total_score}。
+                {preview.resubmit
+                  ? "这是重新提交：服务端可能拒绝（已提交/次数用尽），也可能按任务更新成绩。"
+                  : "作文由服务端批改；提交后仍可重新提交。"}
               </p>
+              {preview.resubmit && (
+                <p className="field-hint" role="note">
+                  本次上报学习时长 {preview.seconds} 秒；服务端如何处理以实际返回为准。
+                </p>
+              )}
               <ul className="summary-list">
                 {preview.answers.map((answer) => (
                   <li key={answer.question_id}>
@@ -261,7 +277,7 @@ export function AppliedWriting() {
             </>
           ) : null
         }
-        confirmLabel="确认提交"
+        confirmLabel={preview?.resubmit ? "确认重新提交" : "确认提交"}
         tone="danger"
         busy={submitMutation.isPending}
         onConfirm={() => submitMutation.mutate()}

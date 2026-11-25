@@ -45,7 +45,32 @@ test.describe("应用文写作", () => {
     await page.getByTestId("confirm-submit").click();
     await expect(page.getByTestId("writing-result")).toContainText("提交成功");
     await expect(page.getByTestId("writing-result")).toContainText("当前分数 12");
-    await expect(page.getByTestId("writing-preview")).toBeDisabled();
+    await expect(page.getByTestId("writing-preview")).toBeEnabled();
+  });
+
+  test("已提交的应用文可以重新提交", async ({ page }) => {
+    await openRoute(page, "/jobs/job-1-8/writing");
+    const input = page.getByTestId("writing-input-1");
+
+    await input.fill("Dear Chris, first draft.");
+    await page.getByTestId("writing-preview").click();
+    await page.getByTestId("confirm-submit").click();
+    await expect(page.getByTestId("writing-result")).toContainText("提交成功");
+    await expect(page.getByText("已提交 · 可重新提交")).toBeVisible();
+    await expect(input).toBeEnabled();
+
+    await input.fill("Dear Chris, second draft.");
+    await page.getByTestId("writing-preview").click();
+    await expect(page.getByTestId("confirm-dialog")).toContainText(
+      "确认重新提交应用文",
+    );
+    await expect(page.getByTestId("confirm-dialog")).toContainText(
+      "服务端可能拒绝",
+    );
+    await page.getByTestId("confirm-submit").click();
+    await expect(page.getByTestId("writing-result")).toContainText(
+      "重新提交成功",
+    );
   });
 
   test("答案页为纯应用文作业提供提交入口", async ({ page }) => {

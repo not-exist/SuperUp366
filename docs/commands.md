@@ -151,6 +151,12 @@ and stores it in a single-use token together with the job's `contentId`,
 `contentId`, then reads the account-wide finished list back. No score is sent:
 the server grades the essay. Expired jobs are warned about, not blocked.
 
+A finished job can be previewed again: the preview returns `resubmit` and
+`seconds`, and the submit result returns `resubmitted`. The server's behavior
+for a repeated writing submission is not verified yet: it may accept and update
+the task, or answer `-13` (localized as `duplicate_submission`). The UI warns
+about both outcomes and never retries the write.
+
 ## Word PK
 
 | Command | Args | Returns |
@@ -203,10 +209,10 @@ required), fetch the paper from `xot-api /client/textbook/paperinfo`, and build
 the same view. Their submit row is selected by `packType`: `packType < 7` uses the
 legacy flipbook shape (`srcType = 1`, empty `result`, flattened `qstJson`), while
 other supported pack types use the textbook bridge (`srcType = 2`, XML `result`,
-empty `qstJson`). Both use an empty `studyTaskId` and `taskId = chapterId = page
-id`. The legacy shape is based on static extraction and is not yet end-to-end
-confirmed. Only `book_type = 2` is accepted; ordinary books submit through a
-different branch.
+empty `qstJson`). Both use an empty `studyTaskId`; `taskId` is the page id and
+`chapterId` is the page's `parentId` from the book tree. The legacy shape is
+confirmed end to end on 2026-11-21 (`docs/protocol/confirmed.md`). Only
+`book_type = 2` is accepted; ordinary books submit through a different branch.
 
 `readaloud_upload` validates the mp3, uploads it to OSS with the STS
 credentials, and stores the resulting URL. Uploading again for the same
@@ -219,6 +225,15 @@ preview stores the book/task ids in the token instead of a job id.
 `readaloud_submit` consumes the token, posts once to
 `/client/task/score/submit/v2`, then reads the completion list back: the
 finished-job list for a job, `/client/book/finished-task/list` for a book page.
+
+A finished task is not blocked from a new preview. Each preview issues its own
+single-use token, so the token still prevents replaying one confirmation, while
+an explicit second preview can submit again. The preview returns `resubmit` and
+`seconds`; the submit result returns `resubmitted`. For a course-book page the
+server accepts the duplicate, updates the finished row in place and accumulates
+the reported `seconds` (verified live on 2026-11-25). A scheduled job may answer
+`-13` instead; that is surfaced as the localized `duplicate_submission` and is
+never retried.
 
 Expired jobs are not blocked: the server accepted a late submission during
 recon, so the UI only warns. The app has no vendor speech-scoring engine, so
