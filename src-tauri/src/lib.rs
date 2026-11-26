@@ -58,18 +58,40 @@ pub fn app(state: AppState) -> tauri::Builder<tauri::Wry> {
 
 /// Run the desktop application.
 pub fn run() {
-    let state = tauri::async_runtime::block_on(async {
-        AppState::open().await.unwrap_or_else(|_| {
-            AppState::with_database(
-                // A failed open must not crash the app to a blank screen; fall
-                // back to in-memory state so the user can log in and see errors.
-                tauri::async_runtime::block_on(up366_store::Database::memory())
-                    .expect("in-memory sqlite"),
-            )
-        })
-    });
+    let state = tauri::async_runtime::block_on(open_state());
 
     app(state)
         .run(tauri::generate_context!())
         .expect("failed to start the up366 application");
+}
+
+/// Open persistent state, falling back to an in-memory database when the
+/// on-disk one cannot be opened.
+async fn open_state() -> AppState {
+    match AppState::open().await {
+        Ok(state) => state,
+        Err(_) => fallback_state().await,
+    }
+}
+
+/// A failed open must not crash the app to a blank screen; in-memory state
+/// still lets the user log in and see errors.
+async fn fallback_state() -> AppState {
+    let db = up366_store::Database::memory()
+        .await
+        .expect("in-memory sqlite");
+    AppState::with_database(db)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The fallback runs inside the runtime started by `run()`; it must not
+    /// try to start a second runtime (Tokio panics on a nested `block_on`).
+    #[tokio::test]
+    async fn fallback_state_opens_inside_an_existing_runtime() {
+        let state = fallback_state().await;
+        assert!(state.active_id().is_none());
+    }
 }
