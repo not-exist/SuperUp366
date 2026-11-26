@@ -77,7 +77,9 @@ async fn open_state() -> AppState {
 /// A failed open must not crash the app to a blank screen; in-memory state
 /// still lets the user log in and see errors.
 async fn fallback_state() -> AppState {
-    let db = up366_store::Database::memory().await.expect("in-memory sqlite");
+    let db = up366_store::Database::memory()
+        .await
+        .expect("in-memory sqlite");
     AppState::with_database(db)
 }
 
