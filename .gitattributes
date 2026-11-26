@@ -1,0 +1,4 @@
+# sqlx embeds migrations at compile time and verifies their checksums against
+# the database at runtime. Keep line endings identical on every platform so a
+# checkout on Windows produces the same checksum as one on Linux/macOS.
+*.sql text eol=lf
